@@ -12,13 +12,20 @@ cd "$(dirname "$0")"
 . ../common.sh
 
 TCC_URL=https://repo.or.cz/tinycc.git
+# Official mirror, used only if repo.or.cz is down; the commit-hash pin below
+# is the integrity check either way.
+TCC_MIRROR_URL=https://github.com/TinyCC/tinycc.git
 TCC_TAG=release_0_9_27
 TCC_COMMIT=d348a9a51d32cece842b7885d27a411436d7887b
 
 mkdir -p work
 banner "FETCH: mainline tinycc @ $TCC_TAG ($TCC_COMMIT)"
 if [ ! -d work/tinycc/.git ]; then
-  git clone -q --depth 1 --branch "$TCC_TAG" "$TCC_URL" work/tinycc
+  if ! git clone -q --depth 1 --branch "$TCC_TAG" "$TCC_URL" work/tinycc; then
+    loud "repo.or.cz unreachable; falling back to the GitHub mirror"
+    rm -rf work/tinycc
+    git clone -q --depth 1 --branch "$TCC_TAG" "$TCC_MIRROR_URL" work/tinycc
+  fi
 fi
 [ "$(git -C work/tinycc rev-parse HEAD)" = "$TCC_COMMIT" ] || die "wrong commit checked out"
 git -C work/tinycc log -1 --format='pinned: %H %s'

@@ -11,13 +11,21 @@ cd "$(dirname "$0")"
 . ../common.sh
 
 TCC_URL=https://repo.or.cz/tinycc.git
+# Official mirror, used only if repo.or.cz is down; the pinned commit hash is
+# the integrity check either way.
+TCC_MIRROR_URL=https://github.com/TinyCC/tinycc.git
 FIX_COMMIT=923fba83f1e541750c4dd48a4ec02af831ee5af8   # mob, 2026-05-06
 
 mkdir -p work
 banner "FETCH: tinycc mob; pre-fix = ${FIX_COMMIT:0:12}~1, control = the fix commit itself"
 if [ ! -d work/tinycc/.git ]; then
-  git clone -q "$TCC_URL" work/tinycc
-  git -C work/tinycc fetch -q origin mob
+  if git clone -q "$TCC_URL" work/tinycc && git -C work/tinycc fetch -q origin mob; then
+    :
+  else
+    loud "repo.or.cz unreachable; falling back to the GitHub mirror"
+    rm -rf work/tinycc
+    git clone -q --single-branch --branch mob "$TCC_MIRROR_URL" work/tinycc
+  fi
 fi
 git -C work/tinycc cat-file -e "$FIX_COMMIT" || die "fix commit not found in mob"
 git -C work/tinycc log -1 --format='fix commit: %H %ci %s' "$FIX_COMMIT"

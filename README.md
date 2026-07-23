@@ -207,7 +207,7 @@ nix-bootstrapping `tinyemu-riscv-mes-tcc` fixpoint forensics for it.)
 |--------|-----|
 | GNU Mes | `mes-0.27.1.tar.gz` from ftp.gnu.org, sha256 `183a40ea…f25d` |
 | janneke tinycc fork | gitlab.com/janneke/tinycc @ `ee75a10cd71bebf23cb23598a49ee3c160ef0fe8` (branch `mes-0.25.0`) |
-| mainline tinycc | repo.or.cz/tinycc.git @ `release_0_9_27` = `d348a9a51d32cece842b7885d27a411436d7887b` |
+| mainline tinycc | repo.or.cz/tinycc.git @ `release_0_9_27` = `d348a9a51d32cece842b7885d27a411436d7887b` (fallback when repo.or.cz is down: the official github.com/TinyCC/tinycc mirror; the commit-hash pin is the integrity check either way) |
 | GNU Guile | `guile-2.0.11.tar.xz` from ftp.gnu.org, sha256 `aed0a4a6…03e2` |
 | Gash | `gash-0.2.0.tar.gz` + `gash-utils-0.2.0.tar.gz` from download.savannah.gnu.org, sha256 `ee415804…7a08e` / `e6aae5a6…59d4a3` |
 | Fiwix | github.com/mikaku/Fiwix tag `v1.5.0` archive, sha256 `e1d5ce53…c4fe0` |
