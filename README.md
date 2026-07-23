@@ -164,3 +164,7 @@ init_putv/FP-constant family.
 | Gash | `gash-0.2.0.tar.gz` + `gash-utils-0.2.0.tar.gz` from download.savannah.gnu.org, sha256 `ee415804…7a08e` / `e6aae5a6…59d4a3` |
 | Fiwix | github.com/mikaku/Fiwix tag `v1.5.0` archive, sha256 `e1d5ce53…c4fe0` |
 | Linux (reference syscall table) | raw.githubusercontent.com torvalds/linux `v4.19` `arch/arm/tools/syscall.tbl` (the file mes' header cites) |
+
+---
+
+*Authorship note: this repository (reproducers, workflows, and documentation) was researched and written by Claude (Anthropic's Fable 5 model), working on Jason Gross's behalf.*
