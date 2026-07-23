@@ -1,0 +1,33 @@
+name: gash-exit-success-gate
+# GREEN == the bug REPRODUCES: under guile 2.0.11 (Guix's armhf
+# %bootstrap-guile version), gash-utils' rm crashes "Unbound variable:
+# EXIT_SUCCESS" with stock gash 0.2.0, and works with the version gate widened
+# from (2 0 10) to (2 2 0).
+# The guile 2.0.11 build is the long pole and is cached across runs.
+on:
+  push:
+  workflow_dispatch:
+jobs:
+  reproduce:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install guile build dependencies
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q libgc-dev libunistring-dev libffi-dev libgmp-dev libltdl-dev pkg-config
+      - name: Restore cached guile 2.0.11
+        id: guile-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/guile-2.0.11-prefix
+          key: guile-2.0.11-${{ runner.os }}-noble-v1
+      - name: Reproduce (rm crashes under 2.0.11 + stock gash; widened gate works)
+        run: bash bugs/06-gash-exit-success-gate/run.sh
+      - name: Save guile 2.0.11 cache
+        if: always() && steps.guile-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ~/guile-2.0.11-prefix
+          key: guile-2.0.11-${{ runner.os }}-noble-v1

@@ -1,0 +1,14 @@
+name: mes-abtod-fraction
+# GREEN == the bug REPRODUCES (abtod misscales fractions / wraps at 32 bits)
+# with a correct host-strtod control.
+on:
+  push:
+  workflow_dispatch:
+jobs:
+  reproduce:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Reproduce (abtod("123456.75") == 123463.5; strtod control correct)
+        run: bash bugs/02-mes-abtod-fraction/run.sh

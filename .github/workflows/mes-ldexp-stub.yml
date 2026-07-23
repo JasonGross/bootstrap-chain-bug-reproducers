@@ -1,0 +1,13 @@
+name: mes-ldexp-stub
+# GREEN == the bug REPRODUCES (Mes' ldexp returns 0) with a correct libm control.
+on:
+  push:
+  workflow_dispatch:
+jobs:
+  reproduce:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Reproduce (mes ldexp stub returns 0; libm control returns 1024)
+        run: bash bugs/01-mes-ldexp-stub/run.sh

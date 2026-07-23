@@ -1,0 +1,17 @@
+name: fiwix-nr-buf-hash-lp64
+# GREEN == the bug REPRODUCES: Fiwix 1.5.0's buffer-hash sizing/indexing goes
+# out of bounds on LP64 (ASan heap-buffer-overflow) while the -m32 control
+# stays in bounds.
+on:
+  push:
+  workflow_dispatch:
+jobs:
+  reproduce:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install 32-bit multilib
+        run: sudo apt-get update -q && sudo apt-get install -y -q gcc-multilib
+      - name: Reproduce (LP64 OOB + ASan; ILP32 control in bounds)
+        run: bash bugs/07-fiwix-nr-buf-hash-lp64/run.sh

@@ -1,0 +1,15 @@
+name: tcc-fp-parse-libc-poison
+# GREEN == the mechanism REPRODUCES: tcc compiling `double x = 0x1p3;` emits
+# 0.0 when its own process links a broken ldexp (LD_PRELOAD shim modeling
+# Mes' return-0 stub), 8.0 without it.
+on:
+  push:
+  workflow_dispatch:
+jobs:
+  reproduce:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Reproduce (0x1p3 -> 0.0 under a return-0 ldexp; 8.0 without)
+        run: bash bugs/05-tcc-fp-parse-libc-poison/run.sh

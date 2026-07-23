@@ -1,0 +1,19 @@
+name: mes-arm-getdents64
+# GREEN == the bug REPRODUCES: mes' arm SYS_getdents64 (0xdc=220, the x86
+# number) mismatches the kernel's arm table (217), and behaviorally lands on
+# madvise under qemu-arm.
+on:
+  push:
+  workflow_dispatch:
+jobs:
+  reproduce:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install arm cross toolchain + qemu-user
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q gcc-arm-linux-gnueabihf qemu-user-static
+      - name: Reproduce (header mismatch + madvise-vs-getdents64 behavior)
+        run: bash bugs/03-mes-arm-getdents64/run.sh

@@ -1,0 +1,19 @@
+name: tcc-mes-arm-ldouble-zero
+# GREEN == the bug REPRODUCES: the janneke tinycc fork's BOOTSTRAP+arm build
+# materializes every long double constant as 0.0 (empty init_putv VT_LDOUBLE
+# store); arm-gcc control emits the real IEEE-754 bytes.
+on:
+  push:
+  workflow_dispatch:
+jobs:
+  reproduce:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install arm cross toolchain + qemu-user
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q gcc-arm-linux-gnueabihf qemu-user-static
+      - name: Reproduce (1000000000.0L -> all-zero .data bytes; gcc control -> 0x41CDCD6500000000)
+        run: bash bugs/04-tcc-mes-arm-ldouble-zero/run.sh
