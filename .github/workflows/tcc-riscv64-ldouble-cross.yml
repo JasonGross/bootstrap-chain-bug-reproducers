@@ -1,0 +1,18 @@
+name: tcc-riscv64-ldouble-cross
+# ALREADY REPORTED upstream (codeberg.org/ekaitz-zarraga/tcc#1; fixed in
+# tinycc mob 923fba83).  Kept as a demonstration.
+# GREEN == the pre-fix mob snapshot emits the host x87 image for a riscv64
+# long double constant; the fix commit (control) emits correct binary128.
+on:
+  push:
+  workflow_dispatch:
+jobs:
+  reproduce:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install riscv64 cross toolchain (oracle)
+        run: sudo apt-get update -q && sudo apt-get install -y -q gcc-riscv64-linux-gnu
+      - name: Reproduce (1e9L -> x87-image bytes pre-fix; binary128 at the fix)
+        run: bash bugs/08-tcc-riscv64-ldouble-cross/run.sh

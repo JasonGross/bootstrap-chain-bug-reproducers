@@ -29,7 +29,7 @@ workflow file).
 | 5 | [`tcc-fp-parse-libc-poison`](bugs/05-tcc-fp-parse-libc-poison/) | [![tcc-fp-parse-libc-poison](../../actions/workflows/tcc-fp-parse-libc-poison.yml/badge.svg)](../../actions/workflows/tcc-fp-parse-libc-poison.yml) | janneke tinycc fork (context for an integer-only FP-literal parser) | `data/mescc-bugs/bug17-musl-strtod-miscompile/` |
 | 6 | [`gash-exit-success-gate`](bugs/06-gash-exit-success-gate/) | [![gash-exit-success-gate](../../actions/workflows/gash-exit-success-gate.yml/badge.svg)](../../actions/workflows/gash-exit-success-gate.yml) | Gash (Timothy Sample; `bug-gash@nongnu.org`), possibly also guix-devel | arm-commencement `gash-utils-boot-fixed` packaging (commencement.scm branch) |
 | 7 | [`fiwix-nr-buf-hash-lp64`](bugs/07-fiwix-nr-buf-hash-lp64/) | [![fiwix-nr-buf-hash-lp64](../../actions/workflows/fiwix-nr-buf-hash-lp64.yml/badge.svg)](../../actions/workflows/fiwix-nr-buf-hash-lp64.yml) | Fiwix (Mikel Izal; [github.com/mikaku/Fiwix](https://github.com/mikaku/Fiwix)) | fiwix-riscv64 port (draft PR #6, worktree `nix-bootstrapping-fiwix-rv64`) |
-| 8 | `tcc-riscv64-ldouble-cross` | ALREADY REPORTED — no workflow | [codeberg.org/ekaitz-zarraga/tcc#1](https://codeberg.org/ekaitz-zarraga/tcc/issues/1); fixed upstream in tinycc mob `923fba83` ("init_putv(): improve long double cross constants") | riscv64 tcc/flex chain (`JasonGross/test-debugging-riscv64-tcc-flex`) |
+| 8 | [`tcc-riscv64-ldouble-cross`](bugs/08-tcc-riscv64-ldouble-cross/) | [![tcc-riscv64-ldouble-cross](../../actions/workflows/tcc-riscv64-ldouble-cross.yml/badge.svg)](../../actions/workflows/tcc-riscv64-ldouble-cross.yml) — **ALREADY REPORTED** | [codeberg.org/ekaitz-zarraga/tcc#1](https://codeberg.org/ekaitz-zarraga/tcc/issues/1); fixed upstream in tinycc mob `923fba83` ("general: long double issues") | riscv64 tcc/flex chain (`JasonGross/test-debugging-riscv64-tcc-flex`) |
 
 ### 1. `mes-ldexp-stub` — GNU Mes' ldexp is a `return 0;` stub
 
@@ -136,13 +136,22 @@ tarball into a user-space harness and shows the LP64 overflow arithmetically
 and as an AddressSanitizer heap-buffer-overflow on the exact hash-insert
 write, with a `-m32` control staying in bounds.
 
-### 8. `tcc-riscv64-ldouble-cross` — (already reported upstream; no workflow)
+### 8. `tcc-riscv64-ldouble-cross` — cross tcc materializes riscv64 long doubles as the host's x87 image (ALREADY REPORTED upstream)
 
-Chain-vintage riscv64 tcc emits wrong long-double *cross* constants; reported
-as [ekaitz-zarraga/tcc#1](https://codeberg.org/ekaitz-zarraga/tcc/issues/1)
-and fixed upstream in tinycc mob commit `923fba83` ("init_putv(): improve
-long double cross constants"). Kept here only as an index entry since it is
-the riscv64 sibling of bugs 4/5's init_putv/FP-constant family.
+A cross tcc targeting riscv64 (`long double` == IEEE binary128, 16 bytes)
+built on x86_64 (`long double` == x87 80-bit) materialized long double
+constants by copying the *host's* x87 image into the target slot: pre-fix,
+`long double x = 1000000000.0L;` emits LE
+`0000000000286bee1c40000000000000` (x87 mantissa `0xEE6B2800…` + exponent
+`0x401C`, zero-padded) instead of the correct binary128
+`000000000000000000000050d6dc1c40`. Reported as
+[ekaitz-zarraga/tcc#1](https://codeberg.org/ekaitz-zarraga/tcc/issues/1) (the
+chain-vintage riscv64 fork) and fixed upstream in tinycc mob commit
+`923fba83` ("general: long double issues") — the workflow builds the mob
+snapshot immediately before the fix (bug) and the fix commit itself
+(control), plus a `riscv64-linux-gnu-gcc` oracle, and is kept only as a
+demonstration; **do not re-report**. It is the riscv64 sibling of bugs 4/5's
+init_putv/FP-constant family.
 
 ## Pinned sources
 
