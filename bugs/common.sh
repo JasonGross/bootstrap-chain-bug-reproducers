@@ -36,3 +36,13 @@ fetch_mes () { # extracts into $1/mes-0.27.1
   fetch "$MES_URL" "$MES_SHA" "$dir/mes-0.27.1.tar.gz"
   [ -d "$dir/mes-0.27.1" ] || tar -xzf "$dir/mes-0.27.1.tar.gz" -C "$dir"
 }
+
+NYACC_URL=https://download.savannah.nongnu.org/releases/nyacc/nyacc-1.00.2.tar.gz
+NYACC_SHA=f36e4fb7dd524dc3f4b354d3d5313f69e7ce5a6ae93711e8cf6d51eaa8d2b318
+
+fetch_nyacc () { # extracts into $1/nyacc-1.00.2 (the C99 parser MesCC uses)
+  local dir="$1"
+  mkdir -p "$dir"
+  fetch "$NYACC_URL" "$NYACC_SHA" "$dir/nyacc-1.00.2.tar.gz"
+  [ -d "$dir/nyacc-1.00.2" ] || tar -xzf "$dir/nyacc-1.00.2.tar.gz" -C "$dir"
+}

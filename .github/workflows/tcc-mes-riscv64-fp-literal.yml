@@ -1,0 +1,20 @@
+name: tcc-mes-riscv64-fp-literal
+# GREEN == the bug REPRODUCES: mes strtod (the literal parser of the riscv64
+# tcc-mes lineage) turns "0.9999" into exactly 999.9, bit-identical to its
+# parse of "999.9", and MesCC cannot materialize the IEEE constant at all;
+# host strtod control is correct.
+on:
+  push:
+  workflow_dispatch:
+jobs:
+  reproduce:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install guile
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q guile-3.0
+      - name: Reproduce ("0.9999" -> 999.9 through the mes FP stack; host control correct)
+        run: bash bugs/10-tcc-mes-riscv64-fp-literal/run.sh

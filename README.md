@@ -30,6 +30,8 @@ workflow file).
 | 6 | [`gash-exit-success-gate`](bugs/06-gash-exit-success-gate/) | [![gash-exit-success-gate](../../actions/workflows/gash-exit-success-gate.yml/badge.svg)](../../actions/workflows/gash-exit-success-gate.yml) | Gash (Timothy Sample; `bug-gash@nongnu.org`), possibly also guix-devel | arm-commencement `gash-utils-boot-fixed` packaging (commencement.scm branch) |
 | 7 | [`fiwix-nr-buf-hash-lp64`](bugs/07-fiwix-nr-buf-hash-lp64/) | [![fiwix-nr-buf-hash-lp64](../../actions/workflows/fiwix-nr-buf-hash-lp64.yml/badge.svg)](../../actions/workflows/fiwix-nr-buf-hash-lp64.yml) | Fiwix (Mikel Izal; [github.com/mikaku/Fiwix](https://github.com/mikaku/Fiwix)) | fiwix-riscv64 port (draft PR #6, worktree `nix-bootstrapping-fiwix-rv64`) |
 | 8 | [`tcc-riscv64-ldouble-cross`](bugs/08-tcc-riscv64-ldouble-cross/) | [![tcc-riscv64-ldouble-cross](../../actions/workflows/tcc-riscv64-ldouble-cross.yml/badge.svg)](../../actions/workflows/tcc-riscv64-ldouble-cross.yml) — **ALREADY REPORTED** | [codeberg.org/ekaitz-zarraga/tcc#1](https://codeberg.org/ekaitz-zarraga/tcc/issues/1); fixed upstream in tinycc mob `923fba83` ("general: long double issues") | riscv64 tcc/flex chain (`JasonGross/test-debugging-riscv64-tcc-flex`) |
+| 9 | [`mescc-riscv64-uint32-add`](bugs/09-mescc-riscv64-uint32-add/) | [![mescc-riscv64-uint32-add](../../actions/workflows/mescc-riscv64-uint32-add.yml/badge.svg)](../../actions/workflows/mescc-riscv64-uint32-add.yml) | GNU Mes (`bug-mes@gnu.org`) | tinyemu-retarget `scripts/tinyemu-riscv/drivers/qemu-user-ref/mescc-u32-repro/` (branch `tinyemu-riscv-mes-tcc`) |
+| 10 | [`tcc-mes-riscv64-fp-literal`](bugs/10-tcc-mes-riscv64-fp-literal/) | [![tcc-mes-riscv64-fp-literal](../../actions/workflows/tcc-mes-riscv64-fp-literal.yml/badge.svg)](../../actions/workflows/tcc-mes-riscv64-fp-literal.yml) | GNU Mes (`bug-mes@gnu.org`); context for the janneke tinycc fork (integer-only FP-literal parser, cf. bug 5) | riscv64 tcc-mes fixpoint forensics (branch `tinyemu-riscv-mes-tcc`, `qemu-user-ref/fixpoint-probes/`) |
 
 ### 1. `mes-ldexp-stub` — GNU Mes' ldexp is a `return 0;` stub
 
@@ -153,6 +155,52 @@ snapshot immediately before the fix (bug) and the fix commit itself
 demonstration; **do not re-report**. It is the riscv64 sibling of bugs 4/5's
 init_putv/FP-constant family.
 
+### 9. `mescc-riscv64-uint32-add` — MesCC's riscv64 backend does unsigned 32-bit arithmetic in 64 bits, with no mod-2^32 truncation
+
+For `unsigned imm = (unsigned) -16;` (= `0xfffffff0`), C requires
+`(imm + (1 << 11)) >> 12` to wrap mod 2^32: `0x7f0 >> 12 == 0`. MesCC
+(mes-0.27.1, riscv64) performs the add in a full 64-bit register and feeds
+the untruncated `0x1000007f0` straight into the shift, yielding `0x100000`.
+A semantically no-op `(unsigned)` cast on the sum makes MesCC emit the
+missing `and 0xffffffff` re-mask and restores correctness. The workflow runs
+the **unmodified MesCC from the tarball on host Guile**, shows the emitted
+`.s` discriminator (no re-mask between the `add` and the `sra` in the uncast
+function; re-mask present in the cast one), then MesCC-compiles mes' own
+riscv64 crt1 + minimal libc TUs and links two static riscv64 probes with
+stage0's own `M1`/`hex2`/`blood-elf` (mescc-tools 1.7.0, built from source):
+under `qemu-riscv64` the uncast probe exits 42 (miscompiled), the cast probe
+0; host gcc and `riscv64-linux-gnu-gcc` controls both yield 0. In-chain
+consequence: tcc 0.9.26-1147 (the mes-lineage riscv64 tcc) guards 12-bit
+immediates with `assert(!((imm + (1 << 11)) >> 12))` — exactly the uncast
+shape — so the MesCC-built tcc-mes false-positives on **every negative
+immediate** and dies on the first function epilogue (`addi sp,sp,-16`) it
+generates; tcc rev 1157 dodges it with an explicit `(uint32_t)` cast.
+
+### 10. `tcc-mes-riscv64-fp-literal` — the riscv64 tcc-mes lineage parses FP literals through the broken mes FP stack (and MesCC has none at all)
+
+The riscv64 sibling of bugs 4/5, exhibited on the mes lineage's own victim
+constant. tcc's `parse_number` ends in `strtod`/`strtold` from the libc the
+running tcc links (bug 5); in the bootstrap that is mes libc, whose
+`strtod → abtod` computes `d = i + f / dbase` (bug 2). The cleanest victim
+is mes libc's **own** `ceil()` (`lib/math/ceil.c`: `long i = number +
+0.9999;`): mes strtod parses `"0.9999"` as `0 + 9999/10` = **exactly 999.9**
+(`0x408F3F3333333333`), bit-identical to its parse of `"999.9"` — two
+different source constants collapse to the same double — instead of
+`0x3FEFFF2E48E8A71E`. In the nix-bootstrapping riscv64 fixpoint forensics
+this is visible in-chain: the **entire binary delta** between the MesCC-built
+tcc-mes and its self-rebuilt successor is that one 8-byte `ceil()` constant
+(the MesCC-built generation emits garbage bits for it; the tcc-rebuilt one
+emits exactly 999.9). The workflow demonstrates the class at component level
+(like bugs 1/2): it compiles the verbatim mes strtod stack with host gcc and
+asserts both parses bit-for-bit against the host-libc control, quotes the
+pinned janneke-fork `tccpp.c` parse path, and adds the MesCC leg (unmodified
+MesCC on host Guile, riscv64 target): a function-local `double d = 0.9999;`
+is emitted as the *integer* immediate `!0.9999 addi`, and a file-scope one is
+a hard `init->data: not supported` error — no stage upstream of tcc-musl can
+even materialize the IEEE constant. (The full in-chain gen2/gen3 exhibit
+needs the whole mes/tcc riscv64 chain and is not run in CI; see the
+nix-bootstrapping `tinyemu-riscv-mes-tcc` fixpoint forensics for it.)
+
 ## Pinned sources
 
 | Source | Pin |
@@ -164,6 +212,8 @@ init_putv/FP-constant family.
 | Gash | `gash-0.2.0.tar.gz` + `gash-utils-0.2.0.tar.gz` from download.savannah.gnu.org, sha256 `ee415804…7a08e` / `e6aae5a6…59d4a3` |
 | Fiwix | github.com/mikaku/Fiwix tag `v1.5.0` archive, sha256 `e1d5ce53…c4fe0` |
 | Linux (reference syscall table) | raw.githubusercontent.com torvalds/linux `v4.19` `arch/arm/tools/syscall.tbl` (the file mes' header cites) |
+| NYACC | `nyacc-1.00.2.tar.gz` from download.savannah.nongnu.org, sha256 `f36e4fb7…b318` |
+| mescc-tools | `mescc-tools-1.7.0.tar.gz` from download.savannah.nongnu.org, sha256 `b682f7bf…575c` |
 
 ---
 
