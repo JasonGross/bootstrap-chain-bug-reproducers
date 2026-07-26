@@ -31,6 +31,7 @@ One musl, built here from pinned source by GCC. One trigger — four lines,
 | **A'** | the same tree **+ the 20-line patch** | clean, no diagnostics | yes | `HELLO from a tcc-linked musl binary` |
 | **B**  | `tcc-0.9.26-1157-gdd46e018`, unpatched | **exits 0** with only `FIXME: handle reloc type 1a/1b/1c` notes | yes | *nothing at all* |
 | **B'** | the same tree **+ the 20-line patch** | clean, no diagnostics | yes | `HELLO from a tcc-linked musl binary` |
+| **C**  | tinycc `mob` @ `85ba3ae8`, **unpatched**, against the same musl built `-fPIC` | clean, no diagnostics | yes | `HELLO from a tcc-linked musl binary` |
 
 **A/A' is the upstream-facing pair.** Mob turns the unhandled relocation
 into a hard error — which is the right behaviour — so upstream's problem is
@@ -43,6 +44,16 @@ toolchain gap becomes a plausible-looking executable that does nothing. B'
 is what shows the silence is caused by these three relocations rather than
 by the harness: same compiler, same link line, same libc, same trigger, plus
 twenty lines.
+
+**C bounds the claim.** It is not "tcc cannot link GCC output". Built
+`-fPIC`, GCC materialises addresses through `GOT_HI20`/`PCREL_*` instead —
+which tcc *does* implement — and the *unpatched* compiler from leg A links
+the identical trigger against the identical libc, cleanly, and the program
+works. So the gap is exactly these three relocations. It is also the honest
+statement of the workaround: build the libc `-fPIC`. That is not available
+to a bootstrap whose GCC is not configured `--enable-default-pie`, which is
+how we hit this in the first place. The leg asserts the PIC `libc.a`
+contains **zero** of the three before drawing any conclusion from it.
 
 The job **re-checks its own premise on every run**: it fetches live `mob`
 and fails loudly if `riscv64-link.c` has grown a `case R_RISCV_HI20:`, so
@@ -72,8 +83,11 @@ back into a confound.
   is a completely different failure and would confound every leg.
 - **No `-static`.** The chain-vintage fork's `-static` path NULL-derefs in
   `tidy_section_headers()` (`s1->dynsym` is null for a static link) — an
-  unrelated, pre-existing fork bug that fires even with the patch applied.
-  All four legs therefore link without `-static`, and the job copies musl's
+  unrelated, pre-existing fork bug that fires even with the patch applied,
+  and it is not a property of the libc: the same crash occurs against a
+  GCC-15.2.0-built musl sysroot as against the one this job builds, while
+  dropping `-static` links fine against both.
+  All legs therefore link without `-static`, and the job copies musl's
   `libc.so` (which *is* the musl loader) to the `PT_INTERP` path tcc bakes
   in, for `qemu-user`. Every leg links `-nostdlib` against `libc.a` **by
   path**, so all of libc is statically linked in regardless.

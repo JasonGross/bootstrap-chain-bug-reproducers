@@ -373,6 +373,65 @@ loud "LEG B' CONTROL PASSED: the same link line, same libc, same trigger --"
 loud "with the three relocations handled it prints correctly.  So LEG B's"
 loud "silence is caused by these relocations, not by the harness."
 
+# ---- C: scope -- the same everything, but a PIC libc ---------------------
+banner "    LEG C -- SCOPE: the UNPATCHED mob links the same libc built -fPIC"
+# This bounds the claim.  It is not "tcc cannot link GCC output"; it is
+# exactly these three absolute relocations.  Built -fPIC, GCC uses
+# GOT_HI20/PCREL_* instead -- which tcc DOES implement -- and the identical
+# unpatched compiler links the identical trigger and the program works.
+# It is also the honest statement of the available workaround.
+SP=$W/sysroot-pic
+if [ ! -f "$SP/lib/libc.a" ]; then
+  rm -rf "$W/mbuild-pic"; mkdir -p "$W/mbuild-pic"
+  ( cd "$W/mbuild-pic" && "$W/musl-$MUSL_VER/configure" \
+        --target=riscv64-linux-gnu --prefix="$SP" \
+        CROSS_COMPILE=riscv64-linux-gnu- CC="$RVGCC" CFLAGS="-fPIC" ) \
+      > "$W/musl-pic-configure.log" 2>&1 \
+    || { tail -20 "$W/musl-pic-configure.log"; die "PIC musl configure failed"; }
+  grep -q '^AOBJS = \$(LOBJS)' "$W/mbuild-pic/config.mak" \
+    || die "the -fPIC musl build did NOT take musl's PIC branch; this leg would
+not be testing what it claims to"
+  ( cd "$W/mbuild-pic" && make -j"$(nproc)" && make install ) \
+      > "$W/musl-pic-build.log" 2>&1 \
+    || { tail -30 "$W/musl-pic-build.log"; die "PIC musl build failed"; }
+fi
+rm -rf "$W/census-pic"; mkdir -p "$W/census-pic"
+( cd "$W/census-pic" && "$RVAR" x "$SP/lib/libc.a" )
+( cd "$W/census-pic" && "$RVREADELF" -r ./* 2>/dev/null ) > "$W/census-pic.rel" || true
+for t in R_RISCV_HI20 R_RISCV_LO12_I R_RISCV_LO12_S; do
+  n=$(grep -cw "$t" "$W/census-pic.rel" || true)
+  printf "    %-18s %6d  (non-PIC libc had %d)\n" "$t" "$n" "${CNT[$t]}"
+  [ "$n" -eq 0 ] || die "the -fPIC libc still contains $t; this leg is not
+isolating the absolute relocations"
+done
+do_link_sr () {  # like do_link but against $SP
+  set +e
+  ( cd "$W" && "$W/mob/riscv64-tcc" -B "$SP/lib" -I "$SP/include" -nostdlib \
+        -o C.bin "$SP/lib/crt1.o" "$SP/lib/crti.o" \
+        hello_reloc.c tf-stubs.c "$SP/lib/crtn.o" "$SP/lib/libc.a" ) \
+      > "$W/C.link.out" 2> "$W/C.link.err"
+  echo $? > "$W/C.rc"
+  set -e
+}
+rm -f "$W/C.bin"; do_link_sr
+report_link C
+[ "$(cat "$W/C.rc")" -eq 0 ] \
+  || die "LEG C: unpatched mob failed to link the PIC libc too -- then the
+defect is broader than the three absolute relocations and the report is wrong"
+if [ -s "$W/C.link.err" ]; then
+  cat "$W/C.link.err"; die "LEG C: unpatched mob emitted diagnostics on the PIC libc"
+fi
+do_run C
+echo "    run exit status  : $(cat "$W/C.runrc")"
+echo "    stdout           : [$(cat "$W/C.run.out")]"
+[ "$(cat "$W/C.run.out")" = "$EXPECTED" ] \
+  || die "LEG C: printed [$(cat "$W/C.run.out")], expected [$EXPECTED]"
+loud "LEG C: scope confirmed.  The SAME unpatched mob tcc that could not link"
+loud "one byte of the non-PIC libc links the PIC one cleanly and the program"
+loud "runs.  The gap is exactly R_RISCV_HI20 / LO12_I / LO12_S -- and building"
+loud "the libc -fPIC is the workaround, which is not available to a bootstrap"
+loud "whose GCC is not configured --enable-default-pie."
+
 # ---------------------------------------------------------------------------
 banner "6/6 -- VERDICT"
 printf '    %-4s %-32s %-12s %-8s %s\n' LEG COMPILER LINK BINARY 'PROGRAM OUTPUT'
@@ -384,8 +443,20 @@ printf '    %-4s %-32s %-12s %-8s %s\n' B  "tcc-0.9.26-1157 unpatched" \
        "rc=0 +FIXME" yes "[]  (nothing)"
 printf '    %-4s %-32s %-12s %-8s %s\n' "B'" "tcc-0.9.26-1157 + patch" \
        "rc=0 clean" yes "[$(cat "$W/Bp.run.out")]"
+printf '    %-4s %-32s %-12s %-8s %s\n' C  "mob ${MOB_PIN:0:12} unpat., PIC libc" \
+       "rc=0 clean" yes "[$(cat "$W/C.run.out")]"
+echo
+loud "SCOPE OF EACH LEG -- read this before citing any of it:"
+echo "      A, A'  UPSTREAM.  The missing relocations.  This is the tinycc ask."
+echo "      B, B'  FORK-ONLY.  The silent-failure MODE.  mob already turns an"
+echo "             unhandled relocation into a hard error (leg A), which is the"
+echo "             behaviour one would ask for.  Only the mes-lineage fork's"
+echo "             'FIXME and carry on' default converts the gap into a working-"
+echo "             looking binary.  Do NOT cite B as an upstream defect."
+echo "      C      SCOPE.  Bounds the claim to the three absolute relocations,"
+echo "             and states the workaround (build the libc -fPIC)."
 echo
 loud "libc.a census: HI20=${CNT[R_RISCV_HI20]} LO12_I=${CNT[R_RISCV_LO12_I]} \
 LO12_S=${CNT[R_RISCV_LO12_S]} across $AFF/$NOBJ objects"
 loud "mob tip $(echo "$TIP" | cut -c1-12) still has no case for any of the three."
-echo "PASS: tcc-riscv64-absolute-relocs reproduced (A, B) with both controls (A', B')"
+echo "PASS: tcc-riscv64-absolute-relocs reproduced (A, B), controls green (A', B'), scope bounded (C)"

@@ -16,8 +16,6 @@ name: tcc-riscv64-absolute-relocs
 on:
   push:
   workflow_dispatch:
-  schedule:
-    - cron: '0 5 1 * *'
 jobs:
   reproduce:
     runs-on: ubuntu-latest
