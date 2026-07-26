@@ -1,0 +1,59 @@
+--- a/softfp.c
++++ b/softfp.c
+@@ -29,13 +29,34 @@
+ #include "cutils.h"
+ #include "softfp.h"
+ 
++#if defined(__GNUC__)
++#define TEMU_CLZ32(a)   __builtin_clz(a)
++#define TEMU_CLZ64(a)   __builtin_clzll(a)
++#else
++/* Only ever reached with a != 0 (see the callers), so no zero case is needed. */
++static inline int temu_clz32(uint32_t a)
++{
++    int n = 0;
++    while (!(a & 0x80000000u)) { a <<= 1; n++; }
++    return n;
++}
++static inline int temu_clz64(uint64_t a)
++{
++    int n = 0;
++    while (!(a & 0x8000000000000000ull)) { a <<= 1; n++; }
++    return n;
++}
++#define TEMU_CLZ32(a)   temu_clz32(a)
++#define TEMU_CLZ64(a)   temu_clz64(a)
++#endif
++
+ static inline int clz32(uint32_t a)
+ {
+     int r;
+     if (a == 0) {
+         r = 32;
+     } else {
+-        r = __builtin_clz(a);
++        r = TEMU_CLZ32(a);
+     }
+     return r;
+ }
+@@ -47,7 +68,7 @@
+         r = 64;
+     } else 
+     {
+-        r = __builtin_clzll(a);
++        r = TEMU_CLZ64(a);
+     }
+     return r;
+ }
+@@ -64,9 +85,9 @@
+         ah = a >> 64;
+         al = a;
+         if (ah != 0)
+-            r = __builtin_clzll(ah);
++            r = TEMU_CLZ64(ah);
+         else
+-            r = __builtin_clzll(al) + 64;
++            r = TEMU_CLZ64(al) + 64;
+     }
+     return r;
+ }

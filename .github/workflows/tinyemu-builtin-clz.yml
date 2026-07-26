@@ -1,0 +1,17 @@
+name: tinyemu-builtin-clz
+# GREEN == the bug REPRODUCES: TinyEMU's softfp.c calls __builtin_clz /
+# __builtin_clzll unconditionally, so tcc compiles it into an object with those
+# symbols UNDEFINED and the link fails; gcc (which has the builtins) is the
+# control; a 6-line guarded fallback makes tcc link and produce results
+# byte-identical to gcc, while leaving gcc's generated .text unchanged.
+on:
+  push:
+  workflow_dispatch:
+jobs:
+  reproduce:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Reproduce (softfp.c: undefined symbol '__builtin_clz' under tcc)
+        run: bash bugs/18-tinyemu-builtin-clz/run.sh

@@ -49,6 +49,7 @@ workflow file).
 | 14 | [`mes-dtoab-leading-zeros`](bugs/14-mes-dtoab-leading-zeros/) | [![mes-dtoab-leading-zeros](../../actions/workflows/mes-dtoab-leading-zeros.yml/badge.svg)](../../actions/workflows/mes-dtoab-leading-zeros.yml) | GNU Mes (`bug-mes@gnu.org`) | arm gmp-6.2.1 `mpn/perfsqr.h` blowup (2.4 GB) |
 | 15 | [`builder-hex0-riscv64-seed`](bugs/15-builder-hex0-riscv64-seed/) | [![builder-hex0-riscv64-seed](../../actions/workflows/builder-hex0-riscv64-seed.yml/badge.svg)](../../actions/workflows/builder-hex0-riscv64-seed.yml) | **Not a bug** — demonstration for a contribution offer to [builder-hex0](https://github.com/ironmeld/builder-hex0) | riscv64 seed port (`JasonGross/builder-hex0` branch `riscv64-port`) |
 | 17 | [`linux-riscv-plic-unmapped-claim`](bugs/17-linux-riscv-plic-unmapped-claim/) | [![linux-riscv-plic-unmapped-claim](../../actions/workflows/linux-riscv-plic-unmapped-claim.yml/badge.svg)](../../actions/workflows/linux-riscv-plic-unmapped-claim.yml) | Linux — `linux-riscv@lists.infradead.org` (`drivers/irqchip/irq-sifive-plic.c`) | fiwix-riscv64 / tinyemu-retarget Gate P3 (Linux 6.1 freeze after `[vda]`) |
+| 18 | [`tinyemu-builtin-clz`](bugs/18-tinyemu-builtin-clz/) | [![tinyemu-builtin-clz](../../actions/workflows/tinyemu-builtin-clz.yml/badge.svg)](../../actions/workflows/tinyemu-builtin-clz.yml) | TinyEMU (Fabrice Bellard; <https://bellard.org/tinyemu/> — no tracker, email the author) | building TinyEMU with a bootstrap-chain tcc (branch `tinyemu-riscv-mes-tcc`) |
 
 
 ### 1. `mes-ldexp-stub` — GNU Mes' ldexp is a `return 0;` stub
@@ -386,6 +387,38 @@ the fixed kernel's own warning output re-asserts the line, which is also a fair
 caution about the fix itself: completing a still-asserted, permanently-unmapped
 level source means re-delivery until something quiesces it (here bounded by the
 printk rate limiter, and the boot finishes normally).
+
+### 18. `tinyemu-builtin-clz` — TinyEMU's softfp.c needs GCC's clz builtins, so a non-GCC compiler cannot build it
+
+`softfp.c`'s `clz32()`/`clz64()` (and `clz128()` under `HAVE_INT128`) call
+`__builtin_clz()`/`__builtin_clzll()` unconditionally — no `#if`, no
+`__has_builtin`, no fallback. A compiler that does not implement those GCC
+extensions compiles the file anyway (they look like ordinary implicit function
+declarations) and emits references to functions that exist nowhere, so the
+failure surfaces only at link time as ``undefined symbol `__builtin_clz'`` —
+a diagnostic that does not say "your compiler lacks a GCC extension".
+
+This is a portability gap rather than a correctness bug, and it matters for a
+specific reason: TinyEMU's appeal in a bootstrap is trust-minimality (~12k
+readable SLOC against qemu-i386's ~424k), but that argument is about source
+size, not provenance, for as long as the binary is produced by an unaudited
+host GCC. Building TinyEMU with a bootstrap-chain compiler closes the gap, and
+in this project's experiment this single construct was the only compiler-scope
+obstacle — with a shim supplied externally, the minimal riscv64 configuration
+built cleanly with a chain `tcc` and booted a full RISC-V guest.
+
+The workflow takes the verbatim pinned TinyEMU release and mainline tcc 0.9.27,
+shows tcc's complete builtin table (`tcctok.h`) has no clz family, and then:
+tcc compiles `softfp.c` into an object carrying `U __builtin_clz` /
+`U __builtin_clzll` and the link fails; **gcc** compiles and links the same file
+and computes correct IEEE-754 conversions (control); with a 6-line guarded
+fallback tcc's object has no undefined builtins, links, and produces results
+**byte-identical** to the gcc control on all 10 conversions; and gcc's generated
+`.text` for `softfp.c` is **byte-identical before and after the patch**, so the
+fallback costs GCC and Clang builds nothing. Because TinyEMU ships as a tarball
+from one host with no VCS and no tracker, the staleness guard is "is the release
+at that URL still the one we pinned, and does its `softfp.c` still carry the
+construct?".
 
 ## Pinned sources
 
