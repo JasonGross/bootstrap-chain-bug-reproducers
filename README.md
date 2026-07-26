@@ -36,6 +36,8 @@ workflow file).
 | 12 | [`bootar-xz-multiblock`](bugs/12-bootar-xz-multiblock/) | [![bootar-xz-multiblock](../../actions/workflows/bootar-xz-multiblock.yml/badge.svg)](../../actions/workflows/bootar-xz-multiblock.yml) | Bootar + r6rs-compression (Timothy Sample, `samplet@ngyro.com`; no issue tracker — cgit); possibly also [weinholt/compression](https://github.com/weinholt/compression) | arm-commencement gcc-10.5.0.tar.xz unpack failure (STATUS.md 2849-2896) |
 | 13 | [`live-bootstrap-riscv64-stale-pins`](bugs/13-live-bootstrap-riscv64-stale-pins/) | [![live-bootstrap-riscv64-stale-pins](../../actions/workflows/live-bootstrap-riscv64-stale-pins.yml/badge.svg)](../../actions/workflows/live-bootstrap-riscv64-stale-pins.yml) | [fosslinux/live-bootstrap](https://github.com/fosslinux/live-bootstrap) — GitHub issue | riscv64 tcc-mes chain (branch `tinyemu-riscv-mes-tcc`) |
 | 14 | [`mes-dtoab-leading-zeros`](bugs/14-mes-dtoab-leading-zeros/) | [![mes-dtoab-leading-zeros](../../actions/workflows/mes-dtoab-leading-zeros.yml/badge.svg)](../../actions/workflows/mes-dtoab-leading-zeros.yml) | GNU Mes (`bug-mes@gnu.org`) | arm gmp-6.2.1 `mpn/perfsqr.h` blowup (2.4 GB) |
+| 15 | [`builder-hex0-riscv64-seed`](bugs/15-builder-hex0-riscv64-seed/) | [![builder-hex0-riscv64-seed](../../actions/workflows/builder-hex0-riscv64-seed.yml/badge.svg)](../../actions/workflows/builder-hex0-riscv64-seed.yml) | **Not a bug** — demonstration for a contribution offer to [builder-hex0](https://github.com/ironmeld/builder-hex0) | riscv64 seed port (`JasonGross/builder-hex0` branch `riscv64-port`) |
+
 
 ### 1. `mes-ldexp-stub` — GNU Mes' ldexp is a `return 0;` stub
 
@@ -296,6 +298,29 @@ GMP's `gen-psqr` write a **2.4 GB** `mpn/perfsqr.h` whose header comment read
 Bugs 5 and 10 are the input half of the same disease; a bootstrap has neither
 half in working order.
 
+### 15. `builder-hex0-riscv64-seed` — DEMONSTRATION: one hex0 seed, two riscv64 machines, byte-identical chain output
+
+**This entry is not a bug.** It is the evidence attached to a contribution
+offer, and it inverts the repo's convention: **green means the demonstration
+succeeded.** builder-hex0 is an auditable hex0 machine-code seed; this is a
+riscv64 port of it, targeted at two different machines. The workflow builds
+both checked-in seeds from their hex0, builds one srcfs disk image carrying
+the real (pinned, unmodified) stage0-posix riscv64 sources, gives each machine
+its own identical copy of that image, and runs the chain to M2-Planet twice:
+once on **QEMU virt** with the baseline seed, once on **TinyEMU** with the
+retargeted seed. It then asserts the two M2-Planet artifacts are
+**byte-identical**. That equality is the whole claim — retargeting changed how
+the builder performs console and disk I/O and nothing about what the chain
+computes, which is the property that makes a second machine target reviewable.
+Each machine needs its own copy of the image because the chain's last step
+writes M2 over `/dev/hda` from sector 0, destroying the control block it
+booted from. TinyEMU is built from Bellard's last release (pinned); `-rw` is
+required or the builder's flushed output goes to a COW overlay and never
+reaches the file. The stage0-posix inputs are fetched as four pinned
+submodules straight from GitHub rather than through the superproject, because
+its `mescc-tools` submodule lives on `git.savannah.nongnu.org`, which the
+riscv64 chain does not need and which was unreachable while this was written.
+
 ## Pinned sources
 
 | Source | Pin |
@@ -309,6 +334,9 @@ half in working order.
 | Linux (reference syscall table) | raw.githubusercontent.com torvalds/linux `v4.19` `arch/arm/tools/syscall.tbl` (the file mes' header cites) |
 | NYACC | `nyacc-1.00.2.tar.gz` from download.savannah.nongnu.org, sha256 `f36e4fb7…b318` |
 | mescc-tools | `mescc-tools-1.7.0.tar.gz` from download.savannah.nongnu.org, sha256 `b682f7bf…575c` |
+| builder-hex0 (riscv64 port) | github.com/JasonGross/builder-hex0 @ `dfc103e6…f205bb` (branch `riscv64-port`) |
+| stage0-posix (riscv64 chain) | oriansj submodules, pinned: `stage0-posix-riscv64` `4688bc66…f72e`, `M2libc` `95e90061…160e`, `M2-Planet` `cadf52af…209a`, `bootstrap-seeds` `cedec6b8…80ed` |
+| TinyEMU | `tinyemu-2019-12-21.tar.gz` from bellard.org, sha256 `be8351f2…5555` |
 | tcc (mes lineage) | lilypond.org/janneke/tcc `tcc-0.9.26-1147-gee75a10c.tar.gz` sha256 `6b8cbd0a…e819f` (= live-bootstrap's own pin) and `tcc-0.9.26-1157-gdd46e018.tar.gz` sha256 `3748c0aa…2232e` |
 | Gash-Utils | `gash-utils-0.2.0.tar.gz` from download.savannah.gnu.org, sha256 `e6aae5a6…59d4a3` |
 | r6rs-compression | git.ngyro.com/r6rs-compression @ `a2d01f24d5ad703ed2742b97053d19dcd42f89b1` (the commit bootar v1b pins) |
