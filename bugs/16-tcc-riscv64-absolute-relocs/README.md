@@ -11,8 +11,12 @@ TLS `TPREL_*` variants — but not the **absolute** forms:
 | `R_RISCV_LO12_S` | 28 (`0x1c`) | the store half (`sw`/`sd`) |
 
 All three are named in tcc's own `elf.h`; there is simply no `case` for them
-in `code_reloc()`, `gotplt_entry_type()` or `relocate()`, so they fall into
-the `default:` branch that prints `FIXME: handle reloc type %x`.
+in `code_reloc()`, `gotplt_entry_type()` or `relocate()`. Two consequences,
+and it matters which one you see: unclassified in `code_reloc()`, they make
+`tccelf.c` raise `Unknown relocation type for got: 26/27/28` *before* the
+linker ever gets to applying them (that is what mob does, leg A); if the
+classifier is passed, `relocate()` drops them into the `default:` branch
+that prints `FIXME: handle reloc type %x` and carries on (leg B).
 
 GCC emits these routinely for riscv64 — they are what an ordinary non-PIC
 `lui`/`addi` pair uses — so **any** attempt to link a GCC-built riscv64
@@ -38,9 +42,11 @@ into a hard error — which is the right behaviour — so upstream's problem is
 that the link is simply not possible, not that it is silently wrong.
 
 **B/B' is the silent-failure mode, and it is fork-only.** `tcc-0.9.26-1157`
-is janneke's mes-lineage fork, the riscv64 tcc the Guix/Mes riscv64 bootstrap
-actually runs. Its `default:` branch prints a note and carries on, so a
-toolchain gap becomes a plausible-looking executable that does nothing. B'
+is janneke's mes-lineage fork at `dd46e018` — *project context, not a
+harness result:* it is the tcc vintage our riscv64 bootstrap chain runs, and
+the same tarball host live-bootstrap pins from. What the harness does show
+is that its `default:` branch prints a note and carries on, so a toolchain
+gap becomes a plausible-looking executable that does nothing. B'
 is what shows the silence is caused by these three relocations rather than
 by the harness: same compiler, same link line, same libc, same trigger, plus
 twenty lines.
@@ -75,18 +81,29 @@ back into a confound.
 ## Two things that are *not* the bug (and why they are in the script)
 
 - **`tf-stubs.c`.** riscv64 `long double` is IEEE binary128, and musl's
-  `vfprintf` references the libgcc soft-float helpers (`__addtf3`,
-  `__floatsitf`, …) for its `%Lf` path. We cannot hand tcc gcc's `libgcc.a`
-  to satisfy them — it is itself full of the relocations under test — so the
-  helpers are stubbed to `abort()`. They are unreachable for a `%s`-only
-  `printf`. Without them the link would fail with *undefined symbols*, which
-  is a completely different failure and would confound every leg.
+  `vfprintf.o` carries undefined references to the libgcc soft-float helpers
+  (`__addtf3`, `__floatsitf`, …) for its `%Lf` path. We cannot hand tcc
+  gcc's `libgcc.a` to satisfy them — it is itself full of the relocations
+  under test — so the helpers are stubbed to `abort()`. They are unreachable
+  for a `%s`-only `printf`, and the passing legs exit 0, so the `abort()`s
+  are demonstrably never reached. **The job does not merely assert this:** it
+  prints `vfprintf.o`'s undefined quad symbols, and ablates the stubs out of
+  the *working* patched link, which then fails with `unresolved reference to
+  '__addtf3'` — a completely different failure that would have confounded
+  every leg. That ablation is a required assertion, not a note.
 - **No `-static`.** The chain-vintage fork's `-static` path NULL-derefs in
   `tidy_section_headers()` (`s1->dynsym` is null for a static link) — an
-  unrelated, pre-existing fork bug that fires even with the patch applied,
-  and it is not a property of the libc: the same crash occurs against a
-  GCC-15.2.0-built musl sysroot as against the one this job builds, while
-  dropping `-static` links fine against both.
+  unrelated, pre-existing fork bug that fires even with the patch applied.
+  *Observed out of band, not by this job:* the same crash occurs against a
+  GCC-15.2.0-built musl sysroot as against the one this job builds, and
+  dropping `-static` links fine against both — so it is not a property of
+  the libc — the remaining variable is the tcc binary (this job's
+  x86_64-hosted cross vs a native riscv64 build of the same source). It has
+  **not** been isolated further, and the job makes no claim either way. It
+  also does not matter for anything here: on the native build where
+  `-static` does work, it reportedly produces a byte-identical-size output
+  with the same diagnostics as without it, so the flag changes nothing about
+  what these legs demonstrate.
   All legs therefore link without `-static`, and the job copies musl's
   `libc.so` (which *is* the musl loader) to the `PT_INTERP` path tcc bakes
   in, for `qemu-user`. Every leg links `-nostdlib` against `libc.a` **by
@@ -113,8 +130,19 @@ indistinguishable from the buggy build.
 One detail the script handles: `relocate()`'s out-of-range diagnostic is
 spelled `tcc_error()` in the chain-vintage tree but `tcc_error_noabort()` on
 current mob, which poisons `tcc_error` inside that function. A patch written
-against the fork does **not** compile on mob as-is. The script copies
-whichever idiom the neighbouring `R_RISCV_PCREL_HI20` range check uses.
+against the fork does **not** compile on mob as-is (`error:
+'use_tcc_error_noabort' undeclared` — *observed out of band; this job builds
+only the corrected form*). The script copies whichever idiom the
+neighbouring `R_RISCV_PCREL_HI20` range check uses, and prints which one it
+chose for each tree.
+
+## What this job does *not* show
+
+It builds all four compilers with the **host** GCC. It therefore does not
+support the separate claim that the patched tcc can be built by the
+unpatched chain tcc — i.e. that the fix is reachable from inside the
+bootstrap with no GCC involved. That is unreproduced here and should not be
+cited to this workflow.
 
 ## Local run
 

@@ -330,6 +330,33 @@ echo "    stdout           : [$(cat "$W/Ap.run.out")]"
 loud "LEG A' CONTROL PASSED: +20 lines and the identical link is clean and the"
 loud "program prints correctly.  Nothing else changed."
 
+# ---- the tf-stubs.c justification, shown rather than asserted ------------
+banner "    WHY tf-stubs.c IS IN EVERY LEG (ablation, not prose)"
+loud "musl's vfprintf.o really does reference the quad soft-float helpers:"
+"$RVREADELF" -h "$SR/lib/libc.a" >/dev/null 2>&1 || true
+riscv64-linux-gnu-nm -A "$SR/lib/libc.a" 2>/dev/null \
+  | grep -E '^[^ ]*vfprintf\.o: +U __(addtf3|subtf3|multf3|extenddftf2|netf2|fixtfsi|fixunstfsi|floatsitf|floatunsitf)$' \
+  | sed 's/^/       /' | sort -u || true
+loud "and dropping tf-stubs.c from the WORKING (patched) link fails like this:"
+set +e
+( cd "$W" && "$W/mob-patched/riscv64-tcc" -B "$SR/lib" -I "$SR/include" \
+      -nostdlib -o nostub.bin "$SR/lib/crt1.o" "$SR/lib/crti.o" \
+      hello_reloc.c "$SR/lib/crtn.o" "$SR/lib/libc.a" ) \
+    > "$W/nostub.out" 2> "$W/nostub.err"
+NOSTUB_RC=$?
+set -e
+head -4 "$W/nostub.err" | sed 's/^/       /'
+[ "$NOSTUB_RC" -ne 0 ] \
+  || die "dropping tf-stubs.c linked anyway -- then the stubs are not doing
+what this script claims and their presence in the other legs is unjustified"
+grep -q "unresolved reference to '__addtf3'" "$W/nostub.err" \
+  || die "dropping tf-stubs.c failed for some reason OTHER than the quad
+soft-float helpers; re-read this step before trusting any leg"
+loud "-- an UNDEFINED SYMBOL error, which is a completely different failure"
+loud "from the relocation failure under test.  That is exactly what the stubs"
+loud "exist to keep out of the other legs.  Legs A'/B'/C exit 0 with the stubs"
+loud "linked in, so the abort()s in them are never reached."
+
 # ---- B: chain vintage, unpatched (the SILENT failure) --------------------
 banner "    LEG B -- chain-vintage fork, UNPATCHED  (the SILENT failure)"
 do_link "$W/$CHAIN_DIR/riscv64-tcc" B
