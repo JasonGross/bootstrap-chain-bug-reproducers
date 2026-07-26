@@ -168,7 +168,8 @@ cat <<EOF
 
     STOCK (pristine fork)        pop {r0,r1,r2,r3} present; doubles arrive right
     + patches 4,5 (BUGGY)        pop {r0,r1,r2,r3} DROPPED; doubles mis-passed
-                                 (e.g. r2(1.5,2.25) receives $(echo $got_buggy | cut -c17-32 | sed 's/^/0x/') for arg0)
+                                 (r2(1.5,2.25): arg0 receives 0x${got_buggy:0:16}
+                                  = the 2nd argument's 2.25, not 1.5)
     + patch 0014 (FIXED)         pop restored; object byte-identical to STOCK;
                                  doubles arrive exactly right
 
