@@ -338,6 +338,26 @@ submodules straight from GitHub rather than through the superproject, because
 its `mescc-tools` submodule lives on `git.savannah.nongnu.org`, which the
 riscv64 chain does not need and which was unreachable while this was written.
 
+### 16. `tcc-riscv64-absolute-relocs` — tinycc's riscv64 linker implements the PC-relative HI20/LO12 relocations but not their absolute siblings
+
+One musl 1.2.5, built here from pinned source by riscv64 GCC, linked four ways
+by a single four-line `printf`-only trigger: unpatched tinycc `mob` fails hard
+(`Unknown relocation type for got: 26/27/28`, no binary at all); the same tree
+plus a 20-line patch links clean and runs; the chain-vintage fork
+`0.9.26-1157` unpatched links `rc=0` with only `FIXME: handle reloc type
+1a/1b/1c` notes and its binary prints nothing; and that fork plus the patch
+links clean and runs. A `-fPIC` leg bounds the claim to exactly these three
+relocations, and the job re-reads live `mob` on every run and fails loudly if
+`riscv64-link.c` grows a `case R_RISCV_HI20:`. Full writeup, all legs, and the
+load-bearing script details are in
+[`bugs/16-tcc-riscv64-absolute-relocs/`](bugs/16-tcc-riscv64-absolute-relocs/).
+
+**Caveat that must not travel wrong:** only the hard-error half is for
+upstream (`tinycc-devel@nongnu.org`, repo.or.cz `mob`). The silent-failure
+half — link `rc=0`, binary prints nothing — is **fork-only** and must not be
+reported upstream; mob already turns the unhandled relocation into a hard
+error.
+
 ### 17. `linux-riscv-plic-unmapped-claim` — a claimed-but-unmapped PLIC source is never completed, and is masked for the rest of the boot
 
 `drivers/irqchip/irq-sifive-plic.c`'s `plic_handle_irq()` claims an interrupt
@@ -446,6 +466,61 @@ construct?".
 hand, not in CI): pointing the bug leg at the patched source makes the run die at
 the named assertion `expected tcc to treat __builtin_clz as an implicit
 declaration`.
+
+### 19. `tinyemu-plic-not-enable-gated` — TinyEMU's RISC-V PLIC has no per-context enable, per-source priority, or per-context threshold registers
+
+On the verbatim pinned TinyEMU release, an M-mode probe writes a known pattern
+to the PLIC `priority[5]`, `enable[ctx0]` and `threshold[ctx0]` registers and
+reads back 0 from every one — those gating registers do not exist; temu's
+per-source state is two words (pending, served) and its claim is
+`ctz32(pending & ~served)` with no enable term. The control runs the identical
+probe on stock `qemu-system-riscv64 -M virt`, whose spec-compliant SiFive PLIC
+reads back exactly what was written — which is also what proves the writes are
+a real stimulus and not a vacuous read of a register that was 0 anyway. The
+`ABLATE=1` run points the "registers absent" assertion at qemu's output and
+must go red on the enable register (ablation recorded in the `run.sh` header,
+2026-07-26). Harness in
+[`bugs/19-tinyemu-plic-not-enable-gated/`](bugs/19-tinyemu-plic-not-enable-gated/).
+
+TinyEMU has no tracker; the intended route is email to Fabrice Bellard. The
+report this backs is the manufactured Linux 6.1 boot hang (nix-bootstrapping
+fiwix-riscv64 / tinyemu-retarget Gate P).
+
+### 20. `tcc-fp-literal-integer-parser` — the patch-verifying leg for tinycc patch 0013 (the integer-only IEEE-754 literal parser)
+
+Bug 5 shows the mechanism — the janneke fork parses every FP literal through
+the C library its own binary links, so a broken-FP libc poisons the constants
+it emits. This entry shows patch 0013 curing it. `run.sh` builds the fork as a
+host→arm cross tcc and compiles a float/double battery four ways, {without
+0013, with 0013} × {clean host FP, an interposed broken `ldexp`/`strtod`}: the
+unpatched parser goes all-zero under poison, the patched one stays byte-exact,
+and both are exact with a healthy libc. Because a cross tcc inherits the host's
+80-bit `long double`, the companion `run-arm.sh` builds the fork **arm-native**
+(`long double == double == 8 bytes`, statically asserted) and runs the same
+2×2 over a battery that **includes `L` literals** — the poisoned column there
+is what shows 0013 delivers exact long doubles when the libc is broken. Both
+legs carry a `buggy+poison` all-zero control and an on-demand ablation
+(recorded in each header). Harness in
+[`bugs/20-tcc-fp-literal-integer-parser/`](bugs/20-tcc-fp-literal-integer-parser/);
+the mechanism it verifies against is [bug 5](bugs/05-tcc-fp-parse-libc-poison/)
+above. Intended upstream: the janneke tinycc fork (the parser 0013 replaces).
+
+### 21. `tcc-arm-double-arg-caller` — the patch-verifying leg for tinycc patch 0014 (the softfp double-argument caller regression)
+
+Builds the fork's arm cross tcc three ways — stock (pristine upstream, the
+control), buggy (our patches 0004+0005), and fixed (0004+0005+0014). At byte
+level, stock emits `pop {r0,r1,r2,r3}` for the softfp double calls, buggy drops
+it, and fixed both restores it and produces an object byte-identical to
+stock's. At runtime, a gcc-built softfp receiver (an independent ABI reference)
+dumps the doubles it actually received: with the buggy compiler they arrive
+wrong, with fixed and with an arm-gcc-built caller they arrive exact. Harness
+in [`bugs/21-tcc-arm-double-arg-caller/`](bugs/21-tcc-arm-double-arg-caller/).
+
+**Caveat that must not travel wrong:** this is **not** an upstream tcc bug. The
+defect is a regression in our own patches 0004/0005; the entry exists to
+validate our patch 0014. Stock upstream carries the register-restore bitmap
+through untouched and is correct, so there is nothing to report here — this is
+internal validation only.
 
 ## Pinned sources
 
