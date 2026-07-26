@@ -33,6 +33,7 @@ workflow file).
 | 9 | [`mescc-riscv64-uint32-add`](bugs/09-mescc-riscv64-uint32-add/) | [![mescc-riscv64-uint32-add](../../actions/workflows/mescc-riscv64-uint32-add.yml/badge.svg)](../../actions/workflows/mescc-riscv64-uint32-add.yml) | GNU Mes (`bug-mes@gnu.org`) | tinyemu-retarget `scripts/tinyemu-riscv/drivers/qemu-user-ref/mescc-u32-repro/` (branch `tinyemu-riscv-mes-tcc`) |
 | 10 | [`tcc-mes-riscv64-fp-literal`](bugs/10-tcc-mes-riscv64-fp-literal/) | [![tcc-mes-riscv64-fp-literal](../../actions/workflows/tcc-mes-riscv64-fp-literal.yml/badge.svg)](../../actions/workflows/tcc-mes-riscv64-fp-literal.yml) | GNU Mes (`bug-mes@gnu.org`); context for the janneke tinycc fork (integer-only FP-literal parser, cf. bug 5) | riscv64 tcc-mes fixpoint forensics (branch `tinyemu-riscv-mes-tcc`, `qemu-user-ref/fixpoint-probes/`) |
 | 11 | [`gash-utils-find-expressions`](bugs/11-gash-utils-find-expressions/) | [![gash-utils-find-expressions](../../actions/workflows/gash-utils-find-expressions.yml/badge.svg)](../../actions/workflows/gash-utils-find-expressions.yml) | Gash-Utils (Timothy Sample; `gash-devel@nongnu.org` — gash-utils lives on Savannah cgit, NOT the Codeberg gash repo) | arm-commencement gcc-4.7.4 C++ rung (truncated `libstdc++.a`) |
+| 12 | [`bootar-xz-multiblock`](bugs/12-bootar-xz-multiblock/) | [![bootar-xz-multiblock](../../actions/workflows/bootar-xz-multiblock.yml/badge.svg)](../../actions/workflows/bootar-xz-multiblock.yml) | Bootar + r6rs-compression (Timothy Sample, `samplet@ngyro.com`; no issue tracker — cgit); possibly also [weinholt/compression](https://github.com/weinholt/compression) | arm-commencement gcc-10.5.0.tar.xz unpack failure (STATUS.md 2849-2896) |
 
 ### 1. `mes-ldexp-stub` — GNU Mes' ldexp is a `return 0;` stub
 
@@ -224,6 +225,32 @@ the nix-bootstrapping arm ladder the same mechanism produced a `libstdc++.a`
 with 8 members (~67 KB) instead of 124, and nothing failed until the first
 C++ link much later. Same silent-degradation class as bug 6.
 
+### 12. `bootar-xz-multiblock` — Bootar's XZ decoder cannot read a stream with more than one block
+
+Bootar is "a thin wrapper around the 'compression' R6RS library", and that
+library — [git.ngyro.com/r6rs-compression](https://git.ngyro.com/r6rs-compression),
+pinned by bootar v1b's `make-ses.scm` at `a2d01f24` — crashes on any XZ
+stream containing **more than one block**. In `xz.scm`, `next-chunk` does
+`(set! lzma2-state (lzma2-decode-chunk ...))`; `lzma2-decode-chunk` signals
+end-of-block by **returning the eof-object**, and the end-of-block handler
+clears `block-start` but never resets `lzma2-state`. When another block
+follows, that stale eof-object is passed back in as state — and because the
+eof-object is *truthy* in Scheme, `(or state (empty-state))` keeps it rather
+than making a fresh state vector, so `(vector-ref state 0)` fails with
+`Wrong type argument (expecting vector): #<eof>`. A single-block stream never
+re-enters, which is why this went unnoticed. **Size is a red herring**: it
+was found on a 77.8 MB `gcc-10.5.0.tar.xz` that took ~54 minutes to fail
+(under an interpreted guile-bootstrap-2.0), but large inputs merely *tend* to
+be multi-block — the workflow reproduces it in seconds on a 4 MB payload.
+The job compresses one payload two ways (62 blocks vs 1), shows the
+single-block decode is byte-identical (control), shows the multi-block decode
+crashing at the same source line the original failure reported
+(`lzma2.scm:51`), then applies a two-line per-block state reset and shows the
+multi-block stream decoding byte-identically with no single-block regression.
+Resetting `lzma2-state` alone is *not* sufficient — the next block then fails
+its integrity check because the per-block checksum state is not reinitialized
+either, which is why we say the multi-block path was never exercised at all.
+
 ## Pinned sources
 
 | Source | Pin |
@@ -237,6 +264,9 @@ C++ link much later. Same silent-degradation class as bug 6.
 | Linux (reference syscall table) | raw.githubusercontent.com torvalds/linux `v4.19` `arch/arm/tools/syscall.tbl` (the file mes' header cites) |
 | NYACC | `nyacc-1.00.2.tar.gz` from download.savannah.nongnu.org, sha256 `f36e4fb7…b318` |
 | mescc-tools | `mescc-tools-1.7.0.tar.gz` from download.savannah.nongnu.org, sha256 `b682f7bf…575c` |
+| Gash-Utils | `gash-utils-0.2.0.tar.gz` from download.savannah.gnu.org, sha256 `e6aae5a6…59d4a3` |
+| r6rs-compression | git.ngyro.com/r6rs-compression @ `a2d01f24d5ad703ed2742b97053d19dcd42f89b1` (the commit bootar v1b pins) |
+| struct-pack / hashing | gitlab.com/weinholt @ `11b71963…239ee` / `eb280801…ef0cb` (likewise bootar's pins) |
 
 ---
 

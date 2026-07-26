@@ -1,0 +1,21 @@
+name: bootar-xz-multiblock
+# GREEN == the bug REPRODUCES: the R6RS compression library bootar v1b pins
+# crashes (vector-ref on #<eof>) decoding a multi-block XZ stream, while the
+# identical payload as a single-block stream decodes byte-identically, and a
+# two-line per-block state reset fixes the multi-block case without regressing
+# the single-block one.
+on:
+  push:
+  workflow_dispatch:
+jobs:
+  reproduce:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install guile + xz
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q guile-3.0 xz-utils
+      - name: Reproduce (62-block .xz crashes; same bytes as 1 block decode; patched leg byte-identical)
+        run: bash bugs/12-bootar-xz-multiblock/run.sh
