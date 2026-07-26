@@ -111,8 +111,11 @@ back into a confound.
   *Observed out of band, not by this job:* the same crash occurs against a
   GCC-15.2.0-built musl sysroot as against the one this job builds, and
   dropping `-static` links fine against both — so it is not a property of
-  the libc — the remaining variable is the tcc binary (this job's
-  x86_64-hosted cross vs a native riscv64 build of the same source). It has
+  the libc — the remaining variable is the tcc binary. That binary differs
+  from the chain's in **two** ways, not one: it is x86_64-hosted rather than
+  native riscv64, *and* it is built with `-DHAVE_LONG_LONG=1` (see below),
+  which the chain's build does not need. So the crash cannot be attributed
+  to cross-vs-native specifically. It has
   **not** been isolated further, and the job makes no claim either way. It
   also does not matter for anything here: on the native build where
   `-static` does work, it reportedly produces a byte-identical-size output
@@ -122,6 +125,22 @@ back into a confound.
   `libc.so` (which *is* the musl loader) to the `PT_INTERP` path tcc bakes
   in, for `qemu-user`. Every leg links `-nostdlib` against `libc.a` **by
   path**, so all of libc is statically linked in regardless.
+
+## `-DHAVE_LONG_LONG=1` is load-bearing too, and only for legs B/B'
+
+The `0.9.26-1157` fork gates its 64-bit ELF typedefs on `HAVE_LONG_LONG` —
+`elf.h`: `#if HAVE_LONG_LONG` / `typedef uint64_t Elf64_Addr;` — and its
+stock `./configure` never defines it (zero occurrences in `configure` or
+`Makefile`). The bootstrap supplies it by another route; a plain
+`./configure && make riscv64-tcc` on this tree therefore fails outright with
+`unknown type name 'Elf64_Addr'`. `run.sh` appends `CFLAGS+=-DHAVE_LONG_LONG=1`
+to `config.mak` and asserts both that it was not already there and that the
+append took, so a silent no-op fails loudly.
+
+Worth knowing if you rebuild this by hand: without it you will not reproduce
+legs B/B' at all, and the failure gives no hint why. It is also the second
+of the two differences between this job's fork binary and the chain's — see
+the `-static` note above.
 
 ## `-fno-pic` is load-bearing
 
