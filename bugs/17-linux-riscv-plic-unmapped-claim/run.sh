@@ -17,21 +17,29 @@
 # only if `pending & ~claimed & enable`, and only if its priority exceeds the
 # context threshold).  Nothing here depends on an emulator shortcut.
 #
-# GREEN == this matrix holds exactly, with the SAME machine, SAME device tree
-# and SAME pre-kernel stub in each row -- only the kernel differs:
+# GREEN == this matrix holds exactly, on the SAME machine, with only the named
+# variable changing between rows:
 #
-#                                     stock kernel   one-line-fixed kernel
-#   poison  (src 10 enabled+asserted)      1 warn        >= 2 warns
-#   control (src 10 enabled, not asserted) 0 warns          0 warns
-#   none    (stub touches nothing)         0 warns          0 warns
+#                                              stock kernel   + the one-liner
+#   poison, above ndev (enabled + asserted)         1 warn       >= 2 warns
+#   poison, IN range   (qemu's own ndev)            0 warns         0 warns
+#   control, above ndev (enabled, not asserted)     0 warns         0 warns
+#   none,   above ndev (stub touches nothing)       0 warns         0 warns
 #
-#   ... and all six boots reach userspace.
+#   ... and all eight boots reach userspace.
 #
-# The 1-vs-many cell is the bug: the poison source keeps re-asserting (the
-# console UART's THRE line goes high again after every character OpenSBI
-# prints), yet the stock kernel is delivered it exactly ONCE, because the
-# leaked claim latches that gateway shut.  Completing the claim restores
-# delivery.  The control rows show the warning is not spontaneous and that
+# Row 1 vs row 2 answers the maintainer's first question -- "why did
+# __plic_init() not clear it?".  Identical stub, identical kernel; the ONLY
+# difference is whether the source is inside the DT's riscv,ndev.  In range,
+# Linux's clear-enables loop neutralises the prior stage and nothing is
+# delivered at all; above it, the enable survives and the source is claimed
+# while unmapped.
+#
+# The 1-vs-many cell in row 1 is the bug itself: the poison source keeps
+# re-asserting (the console UART's THRE line goes high again after every
+# character OpenSBI prints), yet the stock kernel is delivered it exactly ONCE,
+# because the leaked claim latches that gateway shut.  Completing the claim
+# restores delivery.  Rows 3 and 4 show the warning is not spontaneous and that
 # qemu's PLIC really is enable-gated.
 cd "$(dirname "$0")"
 . ../common.sh
@@ -83,6 +91,15 @@ banner "2/6 -- the pinned kernel we actually run"
 fetch "$LINUX_URL" "$LINUX_SHA" "linux-${LINUX_VER}.tar.xz"
 [ -d "linux-${LINUX_VER}" ] || tar -xf "linux-${LINUX_VER}.tar.xz"
 SRC=$WORK/linux-${LINUX_VER}
+
+# A previous local run leaves the fix applied in this tree.  Revert it, or the
+# premise check below would report "upstream has fixed it" about our own edit.
+# (Safe: the tarball is sha256-pinned, so its content cannot change under us,
+# and this only ever reverts our own patch.)
+if grep -q 'writel(hwirq, claim)' "$SRC/$PLIC_REL"; then
+  loud "this work tree still carries the fix from a previous run; reverting it"
+  ( cd "$SRC" && patch -p1 -R --batch < "$BUGDIR/plic-complete-unmapped.patch" )
+fi
 
 if [ "${ABLATE:-0}" = 1 ]; then
   loud "ABLATE=1 -- skipping the pinned-source premise check (see the hook below)"
@@ -182,37 +199,52 @@ rm -f virt-stock.dtb
 qemu-system-riscv64 -M virt,dumpdtb=virt-stock.dtb "${QEMU_COMMON[@]}" \
   -kernel stub-0.bin -append "$CMDLINE" >/dev/null 2>&1 || true
 [ -s virt-stock.dtb ] || die "qemu did not dump a device tree"
-python3 "$BUGDIR/patch-ndev.py" virt-stock.dtb "$POISON_SRC" "$CONTRIVED_NDEV" virt-ndev.dtb
+python3 "$BUGDIR/patch-ndev.py" virt-stock.dtb "$POISON_SRC" "$CONTRIVED_NDEV" virt-ndev.dtb \
+  > ndev.txt
+cat ndev.txt
+STOCK_NDEV=$(sed -n 's/^riscv,ndev: \([0-9]*\) .*/\1/p' ndev.txt)
+[ -n "$STOCK_NDEV" ] || die "could not read qemu's stock riscv,ndev"
 if cmp -s virt-stock.dtb virt-ndev.dtb; then die "the DTB edit changed nothing"; fi
-loud "PLIC source $POISON_SRC (qemu virt's UART0) is now above riscv,ndev=$CONTRIVED_NDEV"
+loud "two device trees: qemu's own (riscv,ndev=$STOCK_NDEV, source $POISON_SRC IN range)"
+loud "                  and the contrived one (riscv,ndev=$CONTRIVED_NDEV, source $POISON_SRC ABOVE range)"
 
 # ---------------------------------------------------------------------------
 # One boot.  Sets LAST_N to the number of unmapped-claim warnings.
 #   check_leg <label> <stub-mode> <image> <log>
 # ---------------------------------------------------------------------------
 LAST_N=
-check_leg () {
-  local label="$1" mode="$2" image="$3" log="$4" n
+check_leg () {              # <label> <stub-mode> <dtb> <expected-ndev> <image> <log>
+  local label="$1" mode="$2" dtb="$3" ndev="$4" image="$5" log="$6" n
   timeout 180 qemu-system-riscv64 -M virt "${QEMU_COMMON[@]}" \
-    -dtb virt-ndev.dtb -kernel "stub-$mode.bin" \
+    -dtb "$dtb" -kernel "stub-$mode.bin" \
     -device loader,file="$image",addr=0x80400000 \
     -initrd initramfs.cpio > "$log" 2>&1 || true
-  n=$(grep -c "can't find mapping for hwirq $POISON_SRC" "$log" || true)
+  # STIMULUS ASSERTIONS -- without these the job could pass while proving
+  # nothing.  (1) the boot has to finish, and (2) Linux has to have sized its
+  # PLIC irqdomain from the device tree we meant to give it: if the DTB edit
+  # silently failed, source 10 would be IN range and the whole "above ndev"
+  # argument would be unsupported while the warning still appeared (an
+  # in-range source with no driver is unmapped too).
   if ! grep -q REPRO-USERSPACE-REACHED "$log"; then
-    echo "--- last 40 lines of $log ---"
-    tail -40 "$log"
+    echo "--- last 40 lines of $log ---"; tail -40 "$log"
     die "$label: the boot never reached userspace"
   fi
-  printf '  %-32s warnings=%-4s boot reached userspace\n' "$label" "$n"
+  grep -q "mapped $ndev interrupts with" "$log" \
+    || { grep -E "riscv-plic" "$log" | sed 's/^/    /'
+         die "$label: Linux did not size its PLIC domain to $ndev interrupts -- \
+the device tree this leg meant to use is not the one it got"; }
+  n=$(grep -c "can't find mapping for hwirq $POISON_SRC" "$log" || true)
+  printf '  %-38s warnings=%-4s boot reached userspace, domain=%s\n' "$label" "$n" "$ndev"
   LAST_N=$n
 }
 
 # ---------------------------------------------------------------------------
-banner "4/6 -- BUG: the stock kernel, three stubs"
+banner "4/6 -- BUG: the stock kernel, four configurations"
 # ---------------------------------------------------------------------------
-check_leg "poison  / stock kernel"  2 Image-stock poison-stock.log;  N_POISON_STOCK=$LAST_N
-check_leg "control / stock kernel"  1 Image-stock control-stock.log; N_CTRL_STOCK=$LAST_N
-check_leg "none    / stock kernel"  0 Image-stock none-stock.log;    N_NONE_STOCK=$LAST_N
+check_leg "poison  above ndev / stock kernel" 2 virt-ndev.dtb  "$CONTRIVED_NDEV" Image-stock poison-stock.log;  N_POISON_STOCK=$LAST_N
+check_leg "poison  IN range   / stock kernel" 2 virt-stock.dtb "$STOCK_NDEV"     Image-stock inrange-stock.log; N_INRANGE_STOCK=$LAST_N
+check_leg "control above ndev / stock kernel" 1 virt-ndev.dtb  "$CONTRIVED_NDEV" Image-stock control-stock.log; N_CTRL_STOCK=$LAST_N
+check_leg "none    above ndev / stock kernel" 0 virt-ndev.dtb  "$CONTRIVED_NDEV" Image-stock none-stock.log;    N_NONE_STOCK=$LAST_N
 
 echo
 echo "  the PLIC probe's own summary, and the warning, from the poison run:"
@@ -220,14 +252,19 @@ grep -E "riscv-plic" poison-stock.log | sed 's/^/    /'
 
 [ "$N_POISON_STOCK" = "1" ] \
   || die "expected EXACTLY 1 unmapped-claim warning on the stock kernel, got $N_POISON_STOCK"
+[ "$N_INRANGE_STOCK" = "0" ] \
+  || die "the in-range leg warned $N_INRANGE_STOCK times; with riscv,ndev=$STOCK_NDEV, __plic_init() \
+must have cleared source $POISON_SRC's enable bit, so it must not be deliverable at all"
 [ "$N_CTRL_STOCK" = "0" ] \
   || die "control leg warned $N_CTRL_STOCK times -- the warning is not caused by the assertion"
 [ "$N_NONE_STOCK" = "0" ] \
   || die "no-stub leg warned $N_NONE_STOCK times -- something other than the stub enabled the source"
-loud "stock kernel: source $POISON_SRC is delivered exactly ONCE and never again."
+loud "stock kernel: source $POISON_SRC is delivered exactly ONCE and never again,"
+loud "and ONLY when it is above riscv,ndev -- the identical stub against qemu's own"
+loud "riscv,ndev=$STOCK_NDEV device tree is neutralised by __plic_init()'s clear-enables loop."
 
 # ---------------------------------------------------------------------------
-banner "5/6 -- CONTROL: the same three legs with the claim completed"
+banner "5/6 -- CONTROL: the same four legs with the claim completed"
 # ---------------------------------------------------------------------------
 cd "$SRC"
 patch -p1 --forward < "$BUGDIR/plic-complete-unmapped.patch" || true
@@ -242,12 +279,14 @@ if cmp -s Image-stock Image-fixed; then
 fi
 loud "Image-fixed differs from Image-stock, as it must"
 
-check_leg "poison  / FIXED kernel"  2 Image-fixed poison-fixed.log;  N_POISON_FIXED=$LAST_N
-check_leg "control / FIXED kernel"  1 Image-fixed control-fixed.log; N_CTRL_FIXED=$LAST_N
-check_leg "none    / FIXED kernel"  0 Image-fixed none-fixed.log;    N_NONE_FIXED=$LAST_N
+check_leg "poison  above ndev / FIXED kernel" 2 virt-ndev.dtb  "$CONTRIVED_NDEV" Image-fixed poison-fixed.log;  N_POISON_FIXED=$LAST_N
+check_leg "poison  IN range   / FIXED kernel" 2 virt-stock.dtb "$STOCK_NDEV"     Image-fixed inrange-fixed.log; N_INRANGE_FIXED=$LAST_N
+check_leg "control above ndev / FIXED kernel" 1 virt-ndev.dtb  "$CONTRIVED_NDEV" Image-fixed control-fixed.log; N_CTRL_FIXED=$LAST_N
+check_leg "none    above ndev / FIXED kernel" 0 virt-ndev.dtb  "$CONTRIVED_NDEV" Image-fixed none-fixed.log;    N_NONE_FIXED=$LAST_N
 
 [ "$N_POISON_FIXED" -ge 2 ] \
   || die "the fixed kernel saw $N_POISON_FIXED warning(s); once the claim is completed the still-asserted source must be delivered again"
+[ "$N_INRANGE_FIXED" = "0" ] || die "fixed in-range leg warned $N_INRANGE_FIXED times"
 [ "$N_CTRL_FIXED" = "0" ] || die "fixed control leg warned $N_CTRL_FIXED times"
 [ "$N_NONE_FIXED" = "0" ] || die "fixed no-stub leg warned $N_NONE_FIXED times"
 
@@ -264,28 +303,35 @@ cat <<EOF
                 clear-enables loop and outside the irqdomain
   Prior stage:  a tiny pre-kernel S-mode stub
 
-                                        stock      one-line fix
-    poison  (enabled + asserted)         $N_POISON_STOCK           $N_POISON_FIXED
-    control (enabled, not asserted)      $N_CTRL_STOCK           $N_CTRL_FIXED
-    none    (stub touches nothing)       $N_NONE_STOCK           $N_NONE_FIXED
-                                       occurrences of
-                                       "can't find mapping for hwirq $POISON_SRC"
+                                              stock    one-line fix
+    poison,  above ndev=$CONTRIVED_NDEV  (enabled+asserted)   $N_POISON_STOCK         $N_POISON_FIXED
+    poison,  IN range ndev=$STOCK_NDEV (enabled+asserted)  $N_INRANGE_STOCK         $N_INRANGE_FIXED
+    control, above ndev (enabled, not asserted)   $N_CTRL_STOCK         $N_CTRL_FIXED
+    none,    above ndev (stub touches nothing)    $N_NONE_STOCK         $N_NONE_FIXED
+                                        occurrences of
+                                        "can't find mapping for hwirq $POISON_SRC"
 
-  Same hardware, same DTB, same stub in every row; the only difference between
-  the two columns is the one-line completion in plic_handle_irq().
+  Every leg asserted that Linux really sized its PLIC irqdomain from the device
+  tree that leg intended ("mapped N interrupts"), so none of the zeros above can
+  be a leg that quietly ran the wrong configuration.
 
+  * Row 1 vs row 2 is the reachability argument, measured: the SAME stub against
+    qemu's own riscv,ndev=$STOCK_NDEV is completely neutralised, because
+    __plic_init() clears the enable bits for hwirq 1..ndev.  Only above ndev does
+    the prior stage's enable survive into Linux.
   * The stock kernel is delivered the source ONCE.  The line is still being
     asserted afterwards -- the fixed column proves that, since it is delivered
     $N_POISON_FIXED times off the same line -- so the single delivery is the
     leaked claim latching the gateway shut, not the device going quiet.
-  * The control rows pin down what is being demonstrated: with the source
-    enabled but never asserted nothing is claimed at all, and with the stub not
+  * Rows 3 and 4 pin down what is being demonstrated: with the source enabled
+    but never asserted nothing is claimed at all, and with the stub not
     configuring the PLIC the source is not deliverable even when asserted --
     qemu's PLIC is enable-gated, unlike the emulator this was first found on.
-  * All six boots reach userspace.  The above-ndev variant demonstrates
-    reachability and recovery, NOT a hang: the masked source here has no Linux
-    driver waiting on it.  The boot-hang consequence needs a boot-critical
-    device on the masked line.
+  * All eight boots reach userspace.  The above-ndev variant demonstrates
+    reachability, the permanent mask, and recovery -- but NOT a hang: the masked
+    source here has no Linux driver waiting on it.  The boot-hang consequence
+    needs a boot-critical device on the masked line, which is what we hit under
+    TinyEMU and is NOT reproduced by this workflow.
 
   Honest note for a reviewer: the poison source here is the console UART, so
   the fixed kernel's own warning output re-asserts the line -- that is why
