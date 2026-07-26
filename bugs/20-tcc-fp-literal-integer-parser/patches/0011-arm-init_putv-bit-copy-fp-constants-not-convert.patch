@@ -1,0 +1,69 @@
+From 0000000000000000000000000000000000000011 Mon Sep 17 00:00:00 2001
+From: Jason Gross <jason@theorem.dev>
+Date: Fri, 17 Jul 2026 20:40:00 +0000
+Subject: [PATCH] arm: init_putv must bit-copy FP constants, not convert them
+
+init_putv() places a floating-point constant into the data section. The
+`#if BOOTSTRAP && __arm__` arm of the VT_FLOAT/VT_DOUBLE cases (present
+in the mes-0.27 base fork, not added by this series) does:
+
+    case VT_FLOAT:   { long *lptr = ptr;      *lptr  = vtop->c.f; }
+    case VT_DOUBLE:  { long long *llptr = ptr; *llptr = vtop->c.d; }
+
+`*lptr = vtop->c.f` is a float-to-long CONVERSION, not a reinterpret: it
+truncates the value to its integer part instead of copying the IEEE bit
+pattern. So every FP constant a bootstrap arm tcc materializes into
+.data is corrupted -- `float x = 2.5f` lands as 0x00000002 (= (long)2.5f,
+byte-exact), and every `double` lands as 0x0000000000000002 ((long long)
+value, further mangled by the negative-path d2lz helper). Any emitted
+`x == 0.0`, and any arithmetic against a materialized constant, is wrong.
+
+It stayed latent through the self-host fixpoint because tcc.c's only
+double==0.0 site (is_zero) emits the VFP zero-immediate `vcmp.f64 #0.0`,
+which needs no constant pool, so init_putv's FP path is essentially never
+exercised while tcc compiles itself. It surfaced building musl (double-
+heavy math), caught by a value-level DDC check on the self-rebuild orbit.
+
+The non-bootstrap arm of the same #if is already correct
+(`*(double*)ptr = vtop->c.d`); the bootstrap arm exists only to dodge a
+MesCC/tcc-mes limitation on the direct FP store. Fix it to copy the bits
+through the CValue union's own integer view (`tab[]`, which aliases f/d
+at offset 0 and is already used on the bootstrap arm) -- no FP store, no
+conversion, no address-of, using only idioms MesCC already compiles here
+(a `TYPE *p = ptr;` local, exactly as the buggy code did, plus an indexed
+store). A gcc build is unaffected (it never takes the bootstrap arm).
+---
+ tccgen.c | 14 ++++++++++----
+ 1 file changed, 10 insertions(+), 4 deletions(-)
+
+diff --git a/tccgen.c b/tccgen.c
+--- a/tccgen.c
++++ b/tccgen.c
+@@ -6364,8 +6364,11 @@ static void init_putv(CType *type, Section *sec, unsigned long c)
+ 		*(float*)ptr = vtop->c.f;
+ #else
+                 {
+-                  long *lptr = ptr;
+-                  *lptr = vtop->c.f;
++                  /* bit copy via the union's own int view (tab[] aliases f):
++                     *lptr = vtop->c.f would store (long)c.f, truncating the
++                     VALUE instead of copying the IEEE bits. */
++                  unsigned *uptr = ptr;
++                  *uptr = vtop->c.tab[0];
+                 }
+ #endif
+ #endif
+@@ -6376,8 +6379,11 @@ static void init_putv(CType *type, Section *sec, unsigned long c)
+ 		*(double *)ptr = vtop->c.d;
+ #else
+                 {
+-                  long long *llptr = ptr;
+-                  *llptr = vtop->c.d;
++                  /* bit copy via the union's own int view (tab[] aliases d):
++                     *llptr = vtop->c.d would store (long long)c.d. */
++                  unsigned *uptr = ptr;
++                  uptr[0] = vtop->c.tab[0];
++                  uptr[1] = vtop->c.tab[1];
+                 }
+ #endif
+ #endif

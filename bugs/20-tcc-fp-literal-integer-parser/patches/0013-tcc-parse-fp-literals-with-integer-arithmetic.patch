@@ -1,0 +1,613 @@
+From 0000000000000000000000000000000000000013 Mon Sep 17 00:00:00 2001
+From: Jason Gross <jason@theorem.dev>
+Date: Wed, 22 Jul 2026 06:00:00 +0000
+Subject: [PATCH] tcc: parse floating-point literals with pure integer
+ arithmetic (no ldexp/strtod)
+
+parse_number() built the value of a floating constant in `double`: the
+hex-float path finished with `d = ldexp(d, exp_val - frac_bits)` and the
+decimal path called strtof/strtod/strtold. Both depend on the tcc
+binary's own floating-point support and its linked libc. When tcc is
+built by a compiler/libc without working floating point -- MesCC, which
+compiles every `double`/`float` as a 32-bit int, over mes libc whose
+ldexp is a `return 0;` stub and whose strtod backend is wrong -- every FP
+literal is destroyed: `0x1pN` parses to 0 (ldexp stub), the hex mantissa
+reconstruction `(double)bn[1]*4294967296.0` truncates 2^32 to 0, and the
+decimal path returns garbage. Such a tcc then bakes zeroed constants into
+musl's scalbn.o/floatscan.o when it compiles musl, poisoning the very
+strtod a later tcc would link -- a circular dependency no tcc in the
+lineage can break (see data/mescc-bugs/bug17, docs/upstream-email-mes-fp.md).
+
+Rewrite the literal-to-bits step to construct the IEEE-754 encoding with
+integer arithmetic only -- no FP op, no 64-bit type, no multiply (x10 is
+(x<<3)+(x<<1)) -- so it is correct even when tcc itself has no working
+floating point. The value is formed as an exact rational N/D of fixed-size
+uint32-limb bignums (hex M*2^be, or decimal significand*10^e10), then
+divided and rounded to the target format with round-to-nearest-even;
+subnormals, overflow->inf and underflow->0 are handled. The result words
+are written through the CValue integer view (tokc.tab[]) rather than
+tokc.d/f/ld, so the bits never transit an FP register or op (this pairs
+with the init_putv tab[] bit-copy of patches 0011/0012).
+
+Scope: float and double are converted on every target (the routine is
+correctly rounded, i.e. bit-identical to a conforming strtod, so it does
+not perturb any existing self-host fixpoint). long double uses the integer
+path only where long double == double 8 bytes: TCC_TARGET_PE and
+TCC_TARGET_ARM (ARM EABI). Wider long double (x86 80-bit, arm64/riscv64
+128-bit) keeps the historical ldexp/strtold reconstruction unchanged --
+LDOUBLE_SIZE is not visible in tccpp.c (included before the *-gen.c that
+defines it), which is why the gate is on TCC_TARGET_ARM, not LDOUBLE_SIZE.
+
+bignum sizing (BIG_N) exceeds the largest intermediate reachable from a
+token_buf-bounded (STRING_MAX_SIZE) literal, so no valid literal can
+overflow it. Validated: vs glibc strtod/strtof the routine is exact on a
+historical-killer battery, on 400k random digit strings, and on 8,000,000
+random IEEE bit patterns round-tripped through excess-precision decimal
+(3M double + 3M float + 2M hex); and MesCC compiles the routine to
+byte-identical output as gcc (zero VFP mnemonics emitted).
+---
+ tccpp.c | 475 ++++++++++++++++++++++++++++++++++++++++++++++++++++----
+ 1 file changed, 439 insertions(+), 36 deletions(-)
+
+diff --git a/tccpp.c b/tccpp.c
+--- a/tccpp.c
++++ b/tccpp.c
+@@ -2149,40 +2149,419 @@
+ }
+ 
+ /* we use 64 bit numbers */
+-#define BN_SIZE 2
++/* ------------------------------------------------------------------
++   Pure-integer IEEE-754 floating-literal construction (patch 0013).
++   Replaces the old bn_lshift/bn_zero + ldexp/strtod float-literal
++   path.  Builds the IEEE bit pattern with integer arithmetic only
++   (no FP op, no 64-bit type, no multiply), so FP literals parse
++   correctly even when tcc itself was compiled by a compiler/libc
++   without working floating point (MesCC + mes libc).  See
++   data/mescc-bugs/bug17 and docs/upstream-email-mes-fp.md.
++   ------------------------------------------------------------------ */
++/* 224 * 32 = 7168 bits.  tcc's token_buf is STRING_MAX_SIZE (1024) chars, so a
++   literal carries at most ~1024 significant decimal digits (~3402 bits); with
++   the 10^k denominator (<= ~10^1363 here), the 2^1074 subnormal scale, and the
++   division-normalisation left-shift, the largest intermediate stays under ~4600
++   bits.  224 limbs leaves comfortable margin, so NO literal that fits tcc's
++   token buffer can overflow the bignum -- the "reject loudly" path is
++   unreachable by construction.  Automatic arrays; only touched at parse time. */
++#define BIG_N 224
+ 
+-/* bn = (bn << shift) | or_val */
+-static void bn_lshift(unsigned int *bn, int shift, int or_val)
++/* ---- bignum primitives (little-endian, fixed BIG_N limbs) ---- */
++
++static void big_zero(unsigned int *a)
++{
++    int i;
++    for (i = 0; i < BIG_N; i++) a[i] = 0;
++}
++
++static void big_copy(unsigned int *d, unsigned int *s)
+ {
+     int i;
++    for (i = 0; i < BIG_N; i++) d[i] = s[i];
++}
++
++static int big_is_zero(unsigned int *a)
++{
++    int i;
++    for (i = 0; i < BIG_N; i++)
++        if (a[i] != 0) return 0;
++    return 1;
++}
++
++/* index (from 1) of the highest set bit; 0 if a==0 */
++static int big_bitlen(unsigned int *a)
++{
++    int i, b;
+     unsigned int v;
+-    for(i=0;i<BN_SIZE;i++) {
+-        v = bn[i];
+-        bn[i] = (v << shift) | or_val;
+-        or_val = v >> (32 - shift);
++    for (i = BIG_N - 1; i >= 0; i--) {
++        if (a[i] != 0) {
++            v = a[i];
++            b = 0;
++            while (v != 0) { v = v >> 1; b = b + 1; }
++            return i * 32 + b;
++        }
++    }
++    return 0;
++}
++
++/* -1,0,1 for a<b, a==b, a>b (unsigned) */
++static int big_cmp(unsigned int *a, unsigned int *b)
++{
++    int i;
++    for (i = BIG_N - 1; i >= 0; i--) {
++        if (a[i] != b[i]) {
++            if (a[i] > b[i]) return 1;   /* both unsigned int */
++            return -1;
++        }
++    }
++    return 0;
++}
++
++/* a += b  (result assumed to fit in BIG_N limbs) */
++static void big_add(unsigned int *a, unsigned int *b)
++{
++    int i;
++    unsigned int carry, ai, s, c;
++    carry = 0;
++    for (i = 0; i < BIG_N; i++) {
++        ai = a[i];
++        s = ai + b[i];
++        c = 0;
++        if (s < ai) c = 1;
++        s = s + carry;
++        if (s < carry) c = c + 1;   /* c stays <= 1 (see notes) */
++        a[i] = s;
++        carry = c;
++    }
++}
++
++/* a -= b  (requires a >= b) */
++static void big_sub(unsigned int *a, unsigned int *b)
++{
++    int i;
++    unsigned int borrow, ai, bi, t, t2, bo;
++    borrow = 0;
++    for (i = 0; i < BIG_N; i++) {
++        ai = a[i];
++        bi = b[i];
++        t = ai - bi;
++        bo = 0;
++        if (ai < bi) bo = 1;
++        t2 = t - borrow;
++        if (t < borrow) bo = bo + 1;
++        a[i] = t2;
++        borrow = bo;
+     }
+ }
+ 
+-static void bn_zero(unsigned int *bn)
++/* a <<= n  (n >= 0) */
++static void big_shl(unsigned int *a, int n)
++{
++    int limb, bit, i;
++    unsigned int carry, v;
++    limb = n / 32;
++    bit = n % 32;
++    if (limb > 0) {
++        for (i = BIG_N - 1; i >= 0; i--) {
++            if (i - limb >= 0) a[i] = a[i - limb];
++            else a[i] = 0;
++        }
++    }
++    if (bit > 0) {
++        carry = 0;
++        for (i = 0; i < BIG_N; i++) {
++            v = a[i];
++            a[i] = (v << bit) | carry;
++            carry = v >> (32 - bit);   /* bit in [1,31] -> shift in [1,31] */
++        }
++    }
++}
++
++/* a >>= 1  (logical) */
++static void big_shr1(unsigned int *a)
+ {
+     int i;
+-    for(i=0;i<BN_SIZE;i++) {
+-        bn[i] = 0;
++    unsigned int carry, v;
++    carry = 0;
++    for (i = BIG_N - 1; i >= 0; i--) {
++        v = a[i];
++        a[i] = (v >> 1) | carry;
++        carry = (v & 1) << 31;
++    }
++}
++
++/* a = a*10 + digit  (0 <= digit <= 9), via shifts only (10 = 8 + 2) */
++static void big_mul10_add(unsigned int *a, int digit)
++{
++    unsigned int t8[BIG_N], t2[BIG_N], old;
++    int j;
++    big_copy(t8, a); big_shl(t8, 3);
++    big_copy(t2, a); big_shl(t2, 1);
++    big_zero(a);
++    big_add(a, t8);
++    big_add(a, t2);
++    if (digit) {
++        old = a[0];
++        a[0] = old + (unsigned int)digit;
++        if (a[0] < old) {                 /* propagate carry out of limb 0 */
++            j = 1;
++            while (j < BIG_N) {
++                a[j] = a[j] + 1;
++                if (a[j] != 0) break;
++                j = j + 1;
++            }
++        }
++    }
++}
++
++/* ---- 2-limb quotient helpers (quotient <= ~54 bits) ---- */
++
++static int q_bitlen(unsigned int *q)
++{
++    unsigned int v;
++    int b;
++    if (q[1] != 0) {
++        v = q[1]; b = 0;
++        while (v != 0) { v = v >> 1; b = b + 1; }
++        return 32 + b;
++    }
++    v = q[0]; b = 0;
++    while (v != 0) { v = v >> 1; b = b + 1; }
++    return b;
++}
++
++static void q_setbit(unsigned int *q, int i)
++{
++    if (i < 32) q[0] = q[0] | ((unsigned int)1 << i);
++    else q[1] = q[1] | ((unsigned int)1 << (i - 32));
++}
++
++static void q_inc(unsigned int *q)
++{
++    q[0] = q[0] + 1;
++    if (q[0] == 0) q[1] = q[1] + 1;
++}
++
++/* q = floor(N/D), R = N mod D.  Precondition (from the caller's scaling):
++   bitlen(N)-bitlen(D) is small so the quotient fits in <= 54 bits. */
++static void big_divmod(unsigned int *N, unsigned int *D,
++                       unsigned int *q, unsigned int *R)
++{
++    unsigned int Dsh[BIG_N];
++    int g, i;
++    q[0] = 0; q[1] = 0;
++    big_copy(R, N);
++    if (big_is_zero(D)) return;            /* defensive; never called with D==0 */
++    g = big_bitlen(N) - big_bitlen(D);
++    if (g < 0) return;                     /* q = 0, R = N */
++    big_copy(Dsh, D);
++    big_shl(Dsh, g);
++    for (i = g; i >= 0; i--) {
++        if (big_cmp(R, Dsh) >= 0) {
++            big_sub(R, Dsh);
++            q_setbit(q, i);
++        }
++        big_shr1(Dsh);
++    }
++}
++
++/* ---- assembly ---- */
++
++/* out <- IEEE bits from (significand q, biased exponent), for one format.
++   q holds the p-bit (or fewer, for subnormal) significand; the implicit bit
++   is cleared by masking. */
++static void fp_assemble(unsigned int *q, int biased, int is64, unsigned int *out)
++{
++    if (is64) {
++        out[0] = q[0];
++        out[1] = ((unsigned int)biased << 20) | (q[1] & 0xFFFFF);
++    } else {
++        out[0] = ((unsigned int)biased << 23) | (q[0] & 0x7FFFFF);
++    }
++}
++
++static void fp_inf(int is64, unsigned int *out)
++{
++    if (is64) { out[0] = 0; out[1] = 0x7FF00000; }
++    else { out[0] = 0x7F800000; }
++}
++
++static void fp_zero(int is64, unsigned int *out)
++{
++    out[0] = 0;
++    if (is64) out[1] = 0;
++}
++
++/* Core: value = N/D (nonneg, D != 0), round-to-nearest-even into `out`. */
++static void fp_ratio_to_bits(unsigned int *Nin, unsigned int *Din,
++                             int is64, unsigned int *out)
++{
++    unsigned int N[BIG_N], D[BIG_N], R[BIG_N], R2[BIG_N], q[2];
++    int p, bias, emin, emax, Fmin;
++    int sN, sD, E, uexp, diff, want, k, biased, c, roundup;
++
++    if (is64) { p = 53; bias = 1023; emin = -1022; emax = 1023; }
++    else      { p = 24; bias = 127;  emin = -126;  emax = 127;  }
++    Fmin = emin - (p - 1);
++
++    if (big_is_zero(Nin)) { fp_zero(is64, out); return; }
++
++    /* ---- normalised attempt: bring quotient into [2^(p-1), 2^p) ---- */
++    big_copy(N, Nin);
++    big_copy(D, Din);
++    sN = 0; sD = 0;
++    want = p - 1;
++    diff = big_bitlen(N) - big_bitlen(D);
++    if (diff < want) { k = want - diff; big_shl(N, k); sN = sN + k; }
++    else if (diff > want) { k = diff - want; big_shl(D, k); sD = sD + k; }
++
++    big_divmod(N, D, q, R);
++    while (q_bitlen(q) > p) { big_shl(D, 1); sD = sD + 1; big_divmod(N, D, q, R); }
++    while (q_bitlen(q) < p) { big_shl(N, 1); sN = sN + 1; big_divmod(N, D, q, R); }
++
++    E = sD - sN;
++    uexp = E + (p - 1);
++
++    if (uexp >= emin) {
++        /* normal (or overflow-by-rounding). round-to-nearest-even: 2R vs D */
++        big_copy(R2, R);
++        big_shl(R2, 1);
++        c = big_cmp(R2, D);
++        roundup = 0;
++        if (c > 0) roundup = 1;
++        else if (c == 0) { if (q[0] & 1) roundup = 1; }
++        if (roundup) {
++            q_inc(q);
++            if (q_bitlen(q) > p) {   /* mantissa carried to 2^p */
++                q[0] = 0; q[1] = 0;
++                q_setbit(q, p - 1);  /* = 2^(p-1) */
++                uexp = uexp + 1;
++            }
++        }
++        if (uexp > emax) { fp_inf(is64, out); return; }
++        biased = uexp + bias;
++        fp_assemble(q, biased, is64, out);
++        return;
++    }
++
++    /* ---- subnormal: fix exponent to Fmin, q = round(value / 2^Fmin) ---- */
++    /* value / 2^Fmin = Nin * 2^(-Fmin) / Din  (Fmin < 0 so -Fmin > 0) */
++    big_copy(N, Nin);
++    big_shl(N, -Fmin);
++    big_copy(D, Din);
++    big_divmod(N, D, q, R);
++    big_copy(R2, R);
++    big_shl(R2, 1);
++    c = big_cmp(R2, D);
++    roundup = 0;
++    if (c > 0) roundup = 1;
++    else if (c == 0) { if (q[0] & 1) roundup = 1; }
++    if (roundup) q_inc(q);
++    /* q in [0, 2^(p-1)]; ==2^(p-1) is the smallest normal (biased 1) */
++    biased = 0;
++    if (q_bitlen(q) >= p) biased = 1;
++    fp_assemble(q, biased, is64, out);
++}
++
++/* ---- decimal entry: value = sig * 10^e10, sig given as digit string ---- */
++/* digits: ASCII digits (no dot/exp), ndig of them; e10 the decimal exponent
++   (already accounts for the fractional-point position and any 'e' exponent). */
++static void fp_dec_to_bits(const char *digits, int ndig, int e10,
++                           int is64, unsigned int *out)
++{
++    unsigned int sig[BIG_N], N[BIG_N], D[BIG_N], ten[BIG_N];
++    int i, blen, de;
++
++    big_zero(sig);
++    for (i = 0; i < ndig; i++)
++        big_mul10_add(sig, digits[i] - '0');
++
++    if (big_is_zero(sig)) { fp_zero(is64, out); return; }
++
++    /* early range guard: De ~ log10(value) = log10(sig) + e10.
++       log10(sig) ~ bitlen(sig)*log10(2) ~ bitlen*30103/100000. */
++    blen = big_bitlen(sig);
++    de = (blen * 30103) / 100000 + e10;
++    if (de > 340) { fp_inf(is64, out); return; }
++    if (de < -340) { fp_zero(is64, out); return; }
++
++    if (e10 >= 0) {
++        big_copy(N, sig);
++        for (i = 0; i < e10; i++) big_mul10_add(N, 0);   /* N = sig * 10^e10 */
++        big_zero(D); D[0] = 1;
++    } else {
++        big_copy(N, sig);
++        big_zero(ten); ten[0] = 1;
++        for (i = 0; i < -e10; i++) big_mul10_add(ten, 0); /* ten = 10^(-e10) */
++        big_copy(D, ten);
+     }
++    fp_ratio_to_bits(N, D, is64, out);
+ }
+ 
++/* decimal string entry (as tcc holds it in token_buf): scan digits + optional
++   '.' + optional 'e'/'E' signed exponent; no F/L suffix present. */
++static void fp_dec_str_to_bits(const char *s, int is64, unsigned int *out)
++{
++    char digits[1088];   /* >= STRING_MAX_SIZE (1024): token_buf digit bound */
++    int n, e10, seen_dot, i, esign, ev;
++    char ch;
++    n = 0; e10 = 0; seen_dot = 0; i = 0;
++    for (;;) {
++        ch = s[i];
++        if (ch == '.') { seen_dot = 1; i = i + 1; continue; }
++        if (ch >= '0' && ch <= '9') {
++            if (n < 1087) { digits[n] = ch; n = n + 1; }
++            if (seen_dot) e10 = e10 - 1;
++            i = i + 1;
++            continue;
++        }
++        break;
++    }
++    if (ch == 'e' || ch == 'E') {
++        i = i + 1;
++        esign = 1; ev = 0;
++        if (s[i] == '+') i = i + 1;
++        else if (s[i] == '-') { esign = -1; i = i + 1; }
++        while (s[i] >= '0' && s[i] <= '9') { ev = ev * 10 + (s[i] - '0'); i = i + 1; }
++        e10 = e10 + esign * ev;
++    }
++    fp_dec_to_bits(digits, n, e10, is64, out);
++}
++
++/* ---- hex entry: value = M * 2^be, M given as a bignum ---- */
++static void fp_hex_to_bits(unsigned int *M, int be, int is64, unsigned int *out)
++{
++    unsigned int N[BIG_N], D[BIG_N];
++    int blen, e2;
++
++    if (big_is_zero(M)) { fp_zero(is64, out); return; }
++
++    /* early range guard on the binary exponent of the value */
++    blen = big_bitlen(M);
++    e2 = blen + be;              /* ~ log2(value) */
++    if (e2 > 1200) { fp_inf(is64, out); return; }
++    if (e2 < -1200) { fp_zero(is64, out); return; }
++
++    if (be >= 0) {
++        big_copy(N, M); big_shl(N, be);
++        big_zero(D); D[0] = 1;
++    } else {
++        big_copy(N, M);
++        big_zero(D); D[0] = 1; big_shl(D, -be);
++    }
++    fp_ratio_to_bits(N, D, is64, out);
++}
++
++
+ /* parse number in null terminated string 'p' and return it in the
+    current token */
+ static void parse_number(const char *p)
+ {
+     int b, t, shift, frac_bits, s, exp_val, ch;
+     char *q;
+-    unsigned int bn[BN_SIZE];
+-    double d;
+-
+-    /* initialize values */
+-    d = 0;
+-    bn_zero(bn);
++    unsigned int hexM[BIG_N];   /* hex-float mantissa, full precision */
++    unsigned int fpout[2];      /* computed IEEE words (little-endian) */
+ 
+     /* number */
+     q = token_buf;
+@@ -2238,7 +2617,7 @@
+                 shift = 4;
+             else 
+                 shift = 1;
+-            bn_zero(bn);
++            big_zero(hexM);
+             q = token_buf;
+             while (1) {
+                 t = *q++;
+@@ -2251,7 +2630,7 @@
+                 } else {
+                     t = t - '0';
+                 }
+-                bn_lshift(bn, shift, t);
++                big_shl(hexM, shift); hexM[0] |= (unsigned int)t;
+             }
+             frac_bits = 0;
+             if (ch == '.') {
+@@ -2269,7 +2648,7 @@
+                     }
+                     if (t >= b)
+                         tcc_error("invalid digit");
+-                    bn_lshift(bn, shift, t);
++                    big_shl(hexM, shift); hexM[0] |= (unsigned int)t;
+                     frac_bits += shift;
+                     ch = *p++;
+                 }
+@@ -2293,31 +2672,46 @@
+             }
+             exp_val = exp_val * s;
+             
+-            /* now we can generate the number */
+-            /* XXX: should patch directly float number */
+-#if HAVE_FLOAT
+-            d = (double)bn[1] * 4294967296.0 + (double)bn[0];
+-#endif
+-            d = ldexp(d, exp_val - frac_bits);
++            /* generate the IEEE bits from the integer mantissa (hexM) and
++               binary exponent (exp_val - frac_bits) with pure-integer
++               arithmetic; write them through the CValue int view (tokc.tab[]),
++               never through an FP register/op. */
+             t = toup(ch);
+             if (t == 'F') {
+                 ch = *p++;
+                 tok = TOK_CFLOAT;
+-                /* float : should handle overflow */
+-                tokc.f = (float)d;
++                fp_hex_to_bits(hexM, exp_val - frac_bits, 0, fpout);
++                tokc.tab[0] = fpout[0];
+             } else if (t == 'L') {
+                 ch = *p++;
+ #ifdef TCC_TARGET_PE
+                 tok = TOK_CDOUBLE;
+-                tokc.d = d;
++                fp_hex_to_bits(hexM, exp_val - frac_bits, 1, fpout);
++                tokc.tab[0] = fpout[0];
++                tokc.tab[1] = fpout[1];
++#elif defined(TCC_TARGET_ARM)
++                /* ARM EABI: long double == double == 8 bytes. */
++                tok = TOK_CLDOUBLE;
++                fp_hex_to_bits(hexM, exp_val - frac_bits, 1, fpout);
++                tokc.tab[0] = fpout[0];
++                tokc.tab[1] = fpout[1];
+ #else
++                /* wider long double (x86 80-bit, riscv64/arm64 128-bit): the
++                   integer path is not yet ported; keep the historical ldexp
++                   reconstruction (needs a working FP libc). */
+                 tok = TOK_CLDOUBLE;
+-                /* XXX: not large enough */
+-                tokc.ld = (long double)d;
++                {
++                    double d;
++                    d = (double)hexM[1] * 4294967296.0 + (double)hexM[0];
++                    d = ldexp(d, exp_val - frac_bits);
++                    tokc.ld = (long double)d;
++                }
+ #endif
+             } else {
+                 tok = TOK_CDOUBLE;
+-                tokc.d = d;
++                fp_hex_to_bits(hexM, exp_val - frac_bits, 1, fpout);
++                tokc.tab[0] = fpout[0];
++                tokc.tab[1] = fpout[1];
+             }
+         } else {
+             /* decimal floats */
+@@ -2360,12 +2754,21 @@
+             if (t == 'F') {
+                 ch = *p++;
+                 tok = TOK_CFLOAT;
+-                tokc.f = strtof(token_buf, NULL);
++                fp_dec_str_to_bits(token_buf, 0, fpout);
++                tokc.tab[0] = fpout[0];
+             } else if (t == 'L') {
+                 ch = *p++;
+ #ifdef TCC_TARGET_PE
+                 tok = TOK_CDOUBLE;
+-                tokc.d = strtod(token_buf, NULL);
++                fp_dec_str_to_bits(token_buf, 1, fpout);
++                tokc.tab[0] = fpout[0];
++                tokc.tab[1] = fpout[1];
++#elif defined(TCC_TARGET_ARM)
++                /* ARM EABI: long double == double == 8 bytes. */
++                tok = TOK_CLDOUBLE;
++                fp_dec_str_to_bits(token_buf, 1, fpout);
++                tokc.tab[0] = fpout[0];
++                tokc.tab[1] = fpout[1];
+ #else
+                 tok = TOK_CLDOUBLE;
+ #if HAVE_FLOAT
+@@ -2374,9 +2777,9 @@
+ #endif
+             } else {
+                 tok = TOK_CDOUBLE;
+-#if HAVE_FLOAT
+-                tokc.d = strtod(token_buf, NULL);
+-#endif
++                fp_dec_str_to_bits(token_buf, 1, fpout);
++                tokc.tab[0] = fpout[0];
++                tokc.tab[1] = fpout[1];
+             }
+         }
+     } else {

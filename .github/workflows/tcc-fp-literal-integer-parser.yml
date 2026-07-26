@@ -1,0 +1,23 @@
+name: tcc-fp-literal-integer-parser
+# GREEN == patch 0013 is VERIFIED: the janneke tinycc fork's FP-literal parser
+# converts through the linked C library (ldexp/strtod), so a broken-FP libc
+# poisons every float/double constant it emits (all-zero); with patch 0013's
+# integer-only IEEE-754 parser the same broken-libc build emits every constant
+# correctly (byte-identical to a CPython-computed reference), and 0013 is a no-op
+# when the libc is healthy.  The tcc is a gcc-built host->arm cross compiler, so
+# no qemu is needed; the broken libc is interposed with -Wl,--wrap.
+on:
+  push:
+  workflow_dispatch:
+jobs:
+  reproduce:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install arm binutils (objcopy for the emitted arm objects)
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q binutils-arm-linux-gnueabihf
+      - name: "Verify patch 0013 (integer FP-literal parser) survives a broken libc"
+        run: bash bugs/20-tcc-fp-literal-integer-parser/run.sh
