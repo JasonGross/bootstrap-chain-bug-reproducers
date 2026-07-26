@@ -4,11 +4,28 @@ name: tcc-fp-literal-integer-parser
 # poisons every float/double constant it emits (all-zero); with patch 0013's
 # integer-only IEEE-754 parser the same broken-libc build emits every constant
 # correctly (byte-identical to a CPython-computed reference), and 0013 is a no-op
-# when the libc is healthy.  The tcc is a gcc-built host->arm cross compiler, so
-# no qemu is needed; the broken libc is interposed with -Wl,--wrap.
+# when the libc is healthy.
+#
+# Two jobs, two vehicles:
+#   reproduce            -- the fork as a gcc-built host->arm CROSS tcc (RUNS as
+#                           x86, EMITS arm); no qemu, broken libc via -Wl,--wrap.
+#                           Scope: float + double.  It CANNOT test long double,
+#                           because a host->arm cross tcc inherits the HOST's
+#                           80-bit long double for its own tokc.ld.
+#   reproduce-arm-native -- the fork as an ARM-NATIVE tcc (arm-linux-gnueabihf-gcc
+#                           -> arm ELF, run under qemu-arm-static), on which
+#                           long double == double == 8 bytes.  Runs the full 2x2
+#                           INCLUDING long-double `L` literals -- the only cell
+#                           that supports the report's "F/L exact" claim, since
+#                           0013 exists to be exact when the libc is broken.
 on:
   push:
   workflow_dispatch:
+    inputs:
+      ablate_arm:
+        description: "Set to 1 to run the arm-native leg's ablation (point fixed+poison at the buggy compiler; the fix assertion MUST go red)."
+        required: false
+        default: "0"
 jobs:
   reproduce:
     runs-on: ubuntu-latest
@@ -21,3 +38,16 @@ jobs:
           sudo apt-get install -y -q binutils-arm-linux-gnueabihf
       - name: "Verify patch 0013 (integer FP-literal parser) survives a broken libc"
         run: bash bugs/20-tcc-fp-literal-integer-parser/run.sh
+  reproduce-arm-native:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install faithful arm-native toolchain + qemu-user
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q gcc-arm-linux-gnueabihf binutils-arm-linux-gnueabihf qemu-user-static
+      - name: "Verify 0013 makes long-double literals exact under a broken libc (faithful arm)"
+        env:
+          ABLATE: ${{ github.event.inputs.ablate_arm || '0' }}
+        run: bash bugs/20-tcc-fp-literal-integer-parser/run-arm.sh
