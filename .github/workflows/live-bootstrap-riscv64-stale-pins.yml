@@ -1,0 +1,21 @@
+name: live-bootstrap-riscv64-stale-pins
+# GREEN == the bug REPRODUCES: live-bootstrap master still pins tcc-0.9.26-1147
+# for riscv64 with checksums untouched since 865b9aea, and that pinned source's
+# own EI/ES assertion -- lifted verbatim -- FIRES under MesCC for the immediate
+# of the first epilogue instruction tcc emits, while 1157's cast version and
+# host gcc both pass.
+on:
+  push:
+  workflow_dispatch:
+jobs:
+  reproduce:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install guile + qemu-user
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q guile-3.0 qemu-user-static
+      - name: Reproduce (pinned 1147 guard fires under MesCC; 1157 + host gcc pass)
+        run: bash bugs/13-live-bootstrap-riscv64-stale-pins/run.sh

@@ -34,6 +34,7 @@ workflow file).
 | 10 | [`tcc-mes-riscv64-fp-literal`](bugs/10-tcc-mes-riscv64-fp-literal/) | [![tcc-mes-riscv64-fp-literal](../../actions/workflows/tcc-mes-riscv64-fp-literal.yml/badge.svg)](../../actions/workflows/tcc-mes-riscv64-fp-literal.yml) | GNU Mes (`bug-mes@gnu.org`); context for the janneke tinycc fork (integer-only FP-literal parser, cf. bug 5) | riscv64 tcc-mes fixpoint forensics (branch `tinyemu-riscv-mes-tcc`, `qemu-user-ref/fixpoint-probes/`) |
 | 11 | [`gash-utils-find-expressions`](bugs/11-gash-utils-find-expressions/) | [![gash-utils-find-expressions](../../actions/workflows/gash-utils-find-expressions.yml/badge.svg)](../../actions/workflows/gash-utils-find-expressions.yml) | Gash-Utils (Timothy Sample; `gash-devel@nongnu.org` — gash-utils lives on Savannah cgit, NOT the Codeberg gash repo) | arm-commencement gcc-4.7.4 C++ rung (truncated `libstdc++.a`) |
 | 12 | [`bootar-xz-multiblock`](bugs/12-bootar-xz-multiblock/) | [![bootar-xz-multiblock](../../actions/workflows/bootar-xz-multiblock.yml/badge.svg)](../../actions/workflows/bootar-xz-multiblock.yml) | Bootar + r6rs-compression (Timothy Sample, `samplet@ngyro.com`; no issue tracker — cgit); possibly also [weinholt/compression](https://github.com/weinholt/compression) | arm-commencement gcc-10.5.0.tar.xz unpack failure (STATUS.md 2849-2896) |
+| 13 | [`live-bootstrap-riscv64-stale-pins`](bugs/13-live-bootstrap-riscv64-stale-pins/) | [![live-bootstrap-riscv64-stale-pins](../../actions/workflows/live-bootstrap-riscv64-stale-pins.yml/badge.svg)](../../actions/workflows/live-bootstrap-riscv64-stale-pins.yml) | [fosslinux/live-bootstrap](https://github.com/fosslinux/live-bootstrap) — GitHub issue | riscv64 tcc-mes chain (branch `tinyemu-riscv-mes-tcc`) |
 
 ### 1. `mes-ldexp-stub` — GNU Mes' ldexp is a `return 0;` stub
 
@@ -251,6 +252,29 @@ Resetting `lzma2-state` alone is *not* sufficient — the next block then fails
 its integrity check because the per-block checksum state is not reinitialized
 either, which is why we say the multi-block path was never exercised at all.
 
+### 13. `live-bootstrap-riscv64-stale-pins` — the pinned riscv64 tcc cannot build through, and the checksum set mixes eras
+
+`steps/tcc-0.9.26/sources` on live-bootstrap master pins
+**tcc-0.9.26-1147-gee75a10c**, and `tcc-0.9.26.riscv64.checksums` has not been
+touched since `865b9aea` ("Update mes to 0.27.1", 2025-09-19) — a commit that
+bumped only the `tcc-mes` hash. The problem is that the pinned source cannot
+be built by the MesCC that live-bootstrap uses to build it. tcc's `EI()`/`ES()`
+guard their 12-bit immediates with `assert(! ((imm + (1 << 11)) >> 12));`
+(riscv64-gen.c:124/131). That is correct C — `imm` is `uint32_t`, so the add
+wraps mod 2^32 — but MesCC's riscv64 backend evaluates it in 64 bits without
+re-truncating (bug 9 here), so the assertion fires for **every negative
+immediate**, starting with the `addi sp,sp,-16` that opens every function
+epilogue tcc emits. Revision 1157 dodges it with an explicit `(uint32_t)`
+cast. The workflow checks what master pins *today* (failing loudly if upstream
+moves), lifts each revision's guard **verbatim** out of the pinned tarballs,
+and evaluates it for that first-epilogue immediate: the 1147 guard fires under
+MesCC (exit 42), 1157's does not, and host gcc accepts both — so the defect is
+MesCC's while the *consequence* is that this pin cannot build through. What
+the job deliberately does **not** do (too slow for CI, and stated in the log)
+is rebuild tcc to show that the 1157 lineage reproduces the pinned `crt1.o`
+`cc417e9d…` byte-exactly — the fact that makes the set "mixed-era" rather than
+merely stale; that remains local evidence.
+
 ## Pinned sources
 
 | Source | Pin |
@@ -264,6 +288,7 @@ either, which is why we say the multi-block path was never exercised at all.
 | Linux (reference syscall table) | raw.githubusercontent.com torvalds/linux `v4.19` `arch/arm/tools/syscall.tbl` (the file mes' header cites) |
 | NYACC | `nyacc-1.00.2.tar.gz` from download.savannah.nongnu.org, sha256 `f36e4fb7…b318` |
 | mescc-tools | `mescc-tools-1.7.0.tar.gz` from download.savannah.nongnu.org, sha256 `b682f7bf…575c` |
+| tcc (mes lineage) | lilypond.org/janneke/tcc `tcc-0.9.26-1147-gee75a10c.tar.gz` sha256 `6b8cbd0a…e819f` (= live-bootstrap's own pin) and `tcc-0.9.26-1157-gdd46e018.tar.gz` sha256 `3748c0aa…2232e` |
 | Gash-Utils | `gash-utils-0.2.0.tar.gz` from download.savannah.gnu.org, sha256 `e6aae5a6…59d4a3` |
 | r6rs-compression | git.ngyro.com/r6rs-compression @ `a2d01f24d5ad703ed2742b97053d19dcd42f89b1` (the commit bootar v1b pins) |
 | struct-pack / hashing | gitlab.com/weinholt @ `11b71963…239ee` / `eb280801…ef0cb` (likewise bootar's pins) |
