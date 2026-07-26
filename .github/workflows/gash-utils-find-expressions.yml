@@ -1,0 +1,20 @@
+name: gash-utils-find-expressions
+# GREEN == the bug REPRODUCES: gash-utils find rejects every POSIX expression
+# ('-name' -> "no such option: -n"), returns EMPTY stdout with rc=1, and the
+# real libtool gather therefore builds a 0-member archive; GNU find control
+# finds the objects and produces a populated one.
+on:
+  push:
+  workflow_dispatch:
+jobs:
+  reproduce:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install guile
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q guile-3.0
+      - name: Reproduce (find -name fails; empty gather -> 0-member archive; GNU find control)
+        run: bash bugs/11-gash-utils-find-expressions/run.sh

@@ -32,6 +32,7 @@ workflow file).
 | 8 | [`tcc-riscv64-ldouble-cross`](bugs/08-tcc-riscv64-ldouble-cross/) | [![tcc-riscv64-ldouble-cross](../../actions/workflows/tcc-riscv64-ldouble-cross.yml/badge.svg)](../../actions/workflows/tcc-riscv64-ldouble-cross.yml) — **ALREADY REPORTED** | [codeberg.org/ekaitz-zarraga/tcc#1](https://codeberg.org/ekaitz-zarraga/tcc/issues/1); fixed upstream in tinycc mob `923fba83` ("general: long double issues") | riscv64 tcc/flex chain (`JasonGross/test-debugging-riscv64-tcc-flex`) |
 | 9 | [`mescc-riscv64-uint32-add`](bugs/09-mescc-riscv64-uint32-add/) | [![mescc-riscv64-uint32-add](../../actions/workflows/mescc-riscv64-uint32-add.yml/badge.svg)](../../actions/workflows/mescc-riscv64-uint32-add.yml) | GNU Mes (`bug-mes@gnu.org`) | tinyemu-retarget `scripts/tinyemu-riscv/drivers/qemu-user-ref/mescc-u32-repro/` (branch `tinyemu-riscv-mes-tcc`) |
 | 10 | [`tcc-mes-riscv64-fp-literal`](bugs/10-tcc-mes-riscv64-fp-literal/) | [![tcc-mes-riscv64-fp-literal](../../actions/workflows/tcc-mes-riscv64-fp-literal.yml/badge.svg)](../../actions/workflows/tcc-mes-riscv64-fp-literal.yml) | GNU Mes (`bug-mes@gnu.org`); context for the janneke tinycc fork (integer-only FP-literal parser, cf. bug 5) | riscv64 tcc-mes fixpoint forensics (branch `tinyemu-riscv-mes-tcc`, `qemu-user-ref/fixpoint-probes/`) |
+| 11 | [`gash-utils-find-expressions`](bugs/11-gash-utils-find-expressions/) | [![gash-utils-find-expressions](../../actions/workflows/gash-utils-find-expressions.yml/badge.svg)](../../actions/workflows/gash-utils-find-expressions.yml) | Gash-Utils (Timothy Sample; `gash-devel@nongnu.org` — gash-utils lives on Savannah cgit, NOT the Codeberg gash repo) | arm-commencement gcc-4.7.4 C++ rung (truncated `libstdc++.a`) |
 
 ### 1. `mes-ldexp-stub` — GNU Mes' ldexp is a `return 0;` stub
 
@@ -200,6 +201,28 @@ a hard `init->data: not supported` error — no stage upstream of tcc-musl can
 even materialize the IEEE constant. (The full in-chain gen2/gen3 exhibit
 needs the whole mes/tcc riscv64 chain and is not run in CI; see the
 nix-bootstrapping `tinyemu-riscv-mes-tcc` fixpoint forensics for it.)
+
+### 11. `gash-utils-find-expressions` — gash-utils' `find` supports no expression predicates, and the empty output silently guts libtool archives
+
+`gash/commands/find.scm` (gash-utils 0.2.0, and unchanged on master) declares
+a getopt-long `option-spec` of exactly `((help) (version))`, so `-name` is
+parsed as a **cluster of short options** (`-n -a -m -e`) and rejected with
+`find: no such option: -n`; `-print` fails on `-p`. Every POSIX find
+expression is rejected the same way, while bare `find DIR` works — which is
+why a bootstrap runs a long way before anything looks wrong. The damage is
+in the failure *mode*: find writes the diagnostic to stderr, exits 1, and
+writes **nothing to stdout** — and the universal caller idiom is command
+substitution, which reads stdout and ignores the status. GNU libtool's
+`func_extract_archives` (gcc-4.7.4 `ltmain.sh` line 2935) does exactly
+that: ``find $my_xdir -name \*.$objext -print -o -name \*.lo -print``. The
+gather comes back empty, the following `ar rc` **succeeds**, and the
+convenience archive is silently empty. The workflow runs the minimal case,
+shows `-print` failing identically, shows bare `find` working, then runs the
+verbatim libtool gather into a real `ar rc`: 0 members / 8 bytes with
+gash-utils find versus 2 members / 128 bytes with GNU find as control. In
+the nix-bootstrapping arm ladder the same mechanism produced a `libstdc++.a`
+with 8 members (~67 KB) instead of 124, and nothing failed until the first
+C++ link much later. Same silent-degradation class as bug 6.
 
 ## Pinned sources
 
