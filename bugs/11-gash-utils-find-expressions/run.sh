@@ -22,6 +22,15 @@ GASHU_URL=https://download.savannah.gnu.org/releases/gash/gash-utils-0.2.0.tar.g
 GASHU_SHA=e6aae5a6f40fdf8c5f8730f66c3f8c3047bde00f8cd97595f5aad2444959d4a3
 
 mkdir -p work
+
+banner "UPSTREAM RE-CHECK: does gash-utils master still declare only ((help) (version))?"
+# NOTE the host: gash-UTILS lives on Savannah cgit, NOT the Codeberg gash repo
+# (that one is the shell -- bug 6). Savannah has been intermittently
+# unreachable; upstream_still_has warns and continues rather than going red,
+# because a host outage is not evidence about the bug.
+upstream_still_has "gash-utils master gash/commands/find.scm" \
+  "https://git.savannah.nongnu.org/cgit/gash/gash-utils.git/plain/gash/commands/find.scm" \
+  "'((help)"
 fetch "$GASH_URL"  "$GASH_SHA"  work/gash-0.2.0.tar.gz
 fetch "$GASHU_URL" "$GASHU_SHA" work/gash-utils-0.2.0.tar.gz
 [ -d work/gash-0.2.0 ]       || tar -xzf work/gash-0.2.0.tar.gz -C work
@@ -76,8 +85,13 @@ grep -q 'no such option: -p' work/err2.txt || die "expected 'no such option: -p'
 loud "so EVERY POSIX find expression is rejected, not just -name."
 
 banner "CONTEXT: bare 'find DIR' works -- which is why nothing complains early"
-gash_find work/d | sort | sed 's/^/    /'
-gash_find work/d | grep -q 'work/d/a.o' || die "bare find should list the tree"
+# NB: capture to a file rather than piping into `grep -q`.  Under `set -o
+# pipefail`, grep -q exits at the first match, the producer takes SIGPIPE, and
+# the pipeline reports failure -- an intermittent false red that bit this job
+# once before it was caught.
+gash_find work/d > work/bare.txt
+sort work/bare.txt | sed 's/^/    /'
+grep -q 'work/d/a.o' work/bare.txt || die "bare find should list the tree"
 loud "a bootstrap can run a long way on this before anything looks wrong."
 
 banner "REPRODUCE 3/3: the real damage -- GNU libtool's func_extract_archives gather"

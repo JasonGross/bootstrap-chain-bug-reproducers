@@ -14,6 +14,14 @@ FIWIX_URL=https://github.com/mikaku/Fiwix/archive/refs/tags/v1.5.0.tar.gz
 FIWIX_SHA=e1d5ce53ff6d8648d0411b6a940ad353dcbe82f4c7fc5761e8324fbf2a4c4fe0
 
 mkdir -p work
+
+banner "UPSTREAM RE-CHECK: are both accused expressions still on Fiwix master?"
+upstream_still_has "Fiwix master fs/buffer.c" \
+  "https://raw.githubusercontent.com/mikaku/Fiwix/master/fs/buffer.c" \
+  "buffer_hash_table_size / sizeof(unsigned int)"
+upstream_still_has "Fiwix master mm/memory.c" \
+  "https://raw.githubusercontent.com/mikaku/Fiwix/master/mm/memory.c" \
+  "n * sizeof(unsigned int)"
 banner "FETCH: Fiwix v1.5.0 (github.com/mikaku/Fiwix)"
 fetch "$FIWIX_URL" "$FIWIX_SHA" work/fiwix-1.5.0.tar.gz
 [ -d work/Fiwix-1.5.0 ] || tar -xzf work/fiwix-1.5.0.tar.gz -C work

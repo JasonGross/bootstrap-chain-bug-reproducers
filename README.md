@@ -5,6 +5,17 @@ Self-contained CI reproducers for upstream-reportable bugs found by the
 measurement project while driving the hex0 → Mes/MesCC → tcc → musl → GCC
 chain on x86, ARM, and RISC-V.
 
+**Staleness guard.** A pinned reproducer proves the bug existed at the pin; it
+cannot notice that upstream has since *fixed* it, so a report can quietly go
+stale while its badge stays green. Where the accused construct is a file on a
+public default branch, the job **re-reads it from upstream on every run** and
+fails loudly if it has gone (entries 6, 7, 11, 13). That failure means "a human
+must re-read this report", not "re-pin until it's quiet". Unreachable hosts are
+treated differently from missing code: if the fetch itself fails the job warns
+and continues, because a host being down is not evidence about the bug — and
+over this project every git host we depend on has been unreachable at least
+once.
+
 **CI philosophy: a workflow is GREEN when the bug REPRODUCES.** Every job
 asserts the *buggy* behavior byte-for-byte (with loud, human-readable evidence
 in the log) and, where cheap, also runs a control demonstrating the *correct*

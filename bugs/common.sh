@@ -46,3 +46,45 @@ fetch_nyacc () { # extracts into $1/nyacc-1.00.2 (the C99 parser MesCC uses)
   fetch "$NYACC_URL" "$NYACC_SHA" "$dir/nyacc-1.00.2.tar.gz"
   [ -d "$dir/nyacc-1.00.2" ] || tar -xzf "$dir/nyacc-1.00.2.tar.gz" -C "$dir"
 }
+
+# --- live upstream re-check -------------------------------------------------
+# A pinned reproducer proves the bug existed at the pin.  It cannot notice that
+# upstream has since FIXED it -- so a report can quietly go stale while its
+# workflow stays green.  upstream_still_has() re-reads the accused file from
+# upstream's live default branch on every run and fails loudly if the accused
+# construct is gone.
+#
+# Crucially it distinguishes two very different failures:
+#   * fetched, and the construct is ABSENT  -> die: upstream may have fixed it,
+#     which is a real signal that a human must look at the report.
+#   * could not fetch at all                -> WARN and continue: a host being
+#     down says nothing about the bug, and going red for it would be a red
+#     that teaches nobody anything.  (Every git host we depend on has been
+#     unreachable at least once during this project.)
+#
+# usage: upstream_still_has <label> <raw-url> <fixed-string>
+upstream_still_has () {
+  local label="$1" url="$2" needle="$3" tmp
+  tmp=$(mktemp)
+  if ! curl -fsSL --max-time 60 --retry 2 -o "$tmp" "$url" 2>/dev/null; then
+    loud "UPSTREAM RE-CHECK SKIPPED ($label): could not reach $url"
+    loud "  (host unreachable != bug fixed -- not failing the run over it)"
+    rm -f "$tmp"
+    return 0
+  fi
+  if grep -qF -- "$needle" "$tmp"; then
+    loud "upstream re-check OK ($label): still present on the live default branch"
+    rm -f "$tmp"
+    return 0
+  fi
+  rm -f "$tmp"
+  echo >&2
+  echo "!! UPSTREAM RE-CHECK FAILED ($label)" >&2
+  echo "!! $url no longer contains:" >&2
+  echo "!!   $needle" >&2
+  echo "!! Upstream may have FIXED this. The pinned reproduction below may" >&2
+  echo "!! still be valid history, but the REPORT needs a human to re-read" >&2
+  echo "!! it before it is sent. This is the intended way for that to" >&2
+  echo "!! surface -- do not just re-pin to silence it." >&2
+  die "upstream re-check failed for $label"
+}

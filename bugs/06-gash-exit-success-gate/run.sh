@@ -24,8 +24,18 @@ GUILE="$PREFIX/bin/guile"
 
 mkdir -p work
 
+banner "UPSTREAM RE-CHECK: is the gate still on gash's live master?"
+# Gash the SHELL is developed on Codeberg (guix/gash) -- see the project README.
+# (Its sibling report, gash-utils' find, is a DIFFERENT repository; see bug 11.)
+upstream_still_has "gash master gash/compat.scm" \
+  "https://codeberg.org/guix/gash/raw/branch/master/gash/compat.scm" \
+  "(if-guile-version-below (2 0 10)"
+
 banner "STEP 1: guile 2.0.11 (the exact interpreter version of Guix's armhf %bootstrap-guile seed)"
-if "$GUILE" --version 2>/dev/null | grep -q '2\.0\.11'; then
+# (captured rather than piped into grep -q -- see the note in bug 11's run.sh
+# about pipefail + SIGPIPE producing intermittent false reds)
+if "$GUILE" --version 2>/dev/null > work/guile-version.txt \
+   && grep -q '2\.0\.11' work/guile-version.txt; then
   loud "using cached guile 2.0.11 at $PREFIX"
 else
   loud "building guile 2.0.11 from source (cached across CI runs)"
