@@ -1,0 +1,24 @@
+name: tinyemu-plic-not-enable-gated
+# GREEN == the finding REPRODUCES: TinyEMU's RISC-V PLIC (riscv_machine.c) has
+# no per-context enable, no per-source priority and no per-context threshold
+# register.  An M-mode program that writes a pattern to those three PLIC
+# registers reads back 0 from every one on temu (the registers do not exist),
+# and reads back exactly what it wrote on stock qemu-system-riscv64 -M virt (a
+# spec-compliant, enable-gated SiFive PLIC -- the control).  The nonzero qemu
+# readback also proves the writes are a real stimulus, not a vacuous read.
+on:
+  push:
+  workflow_dispatch:
+jobs:
+  reproduce:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install riscv64 cross toolchain and qemu
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q gcc-riscv64-linux-gnu \
+            binutils-riscv64-linux-gnu qemu-system-misc
+      - name: "Reproduce: temu PLIC has no enable/priority/threshold; qemu does"
+        run: bash bugs/19-tinyemu-plic-not-enable-gated/run.sh
