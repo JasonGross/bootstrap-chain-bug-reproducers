@@ -29,6 +29,17 @@
 # defect (missing gating) is absent".  The ablation (ABLATE=1) points temu's
 # "registers absent" assertion at qemu's output; it MUST go red on the enable
 # register, proving the harness would notice if temu were enable-gated.
+#
+# ABLATION EXECUTED 2026-07-26 (authoring-time, NOT run in CI -- the green badge
+# above covers only the normal run).  Normal run: green, temu reads back
+# PRIO5/EN0/THR0 = 0/0/0.  ABLATE=1: red for the right reason -- the check,
+# pointed at qemu's spec-compliant output, sees the written 0x20 read back and
+# dies at the enable-register assertion:
+#   FATAL: temu enable readback was '00000020', expected 00000000 (if ABLATE=1
+#   this is the reproducer correctly going red: a gated PLIC returns the written
+#   value)
+# So the green run's temu 00000000 is a real observation, not a check that
+# cannot fail.  Compare your own `ABLATE=1 bash run.sh` against that line.
 cd "$(dirname "$0")"
 . ../common.sh
 BUGDIR=$PWD
