@@ -1,0 +1,67 @@
+From 50456769967829050b0e23ebde505420b496a8a1 Mon Sep 17 00:00:00 2001
+From: Jason Gross <jason@theorem.dev>
+Date: Tue, 22 Jul 2026 05:20:00 +0000
+Subject: [PATCH] arm: restore pop {todo} for a softfp float/double passed in
+ core registers
+
+Follow-up to the two copy_params patches (derive gfunc_call's stack cleanup,
+and rebuild the pop {todo} core-register mask from copy_params' own type_size).
+Those two rebuild the pop {todo} bitmap inline -- discarding assign_regs'
+*todo out-parameter, which MesCC returns short for a by-value struct -- but
+they only rebuild it in the VT_STRUCT arm of CORE_STRUCT_CLASS. A softfp
+`float`/`double` assigned to core registers is ALSO CORE_STRUCT_CLASS, yet it
+takes the is_float vpush path (it has no VT_STRUCT store to hang the rebuild
+on), so its words were never recorded. With the incoming *todo discarded and
+no rebuild, todo stayed 0 for such a parameter and no `pop {todo}` was emitted:
+the value was vpush'd to the stack and r0-r3 were never loaded. A call passing
+two or more doubles (e.g. `pick1(1.5, 2.25)`) therefore left the callee reading
+its arguments from uninitialised core registers.
+
+Rebuild the mask for the non-struct CORE_STRUCT_CLASS case too, using the same
+closed form as the struct arm, from THIS function's size (8 for a double, 4 for
+a float) taken from VT_BTYPE and pplan->start: nw = min(size/4, 4 - start). The
+size must come from VT_BTYPE, not type_size: type_size is the very function
+MesCC mis-executes at runtime (it returns 4 for an 8-byte object -- the
+struct-size bug that motivated patch 5), so a later "simplification" back to
+type_size here would reintroduce the short mask. This restores the push-then-pop
+{todo} marshalling that stock tcc uses for softfp doubles; a gcc-built tcc from
+this source emits byte-identical code to the unpatched fork for these calls (the
+push-then-pop sequence), so it is a faithful restoration, not a codegen change.
+
+Note: this defect is specific to the two preceding copy_params patches in this
+series (which introduced the discard-and-rebuild of *todo); stock upstream tcc
+carries assign_regs' *todo through unchanged and is unaffected.
+---
+ arm-gen.c | 18 ++++++++++++++++++
+ 1 file changed, 18 insertions(+)
+
+diff --git a/arm-gen.c b/arm-gen.c
+--- a/arm-gen.c
++++ b/arm-gen.c
+@@ -1232,6 +1232,24 @@ again:
+                 stack_size -= pplan->prev->end - pplan->start; /* count that pad */
+               }
+             }
++            else if (i == CORE_STRUCT_CLASS) {
++              /* A softfp float/double assigned to core registers takes the
++                 is_float vpush path above (there is no VT_STRUCT store to hang
++                 the mask rebuild on), so its pop {todo} words must be recorded
++                 here too. assign_regs' *todo out-param was discarded at the top
++                 of copy_params (it is short under MesCC for the struct case), so
++                 EVERY CORE_STRUCT_CLASS member rebuilds its own mask; without
++                 this the vpushed doubles stay on the stack and r0-r3 are never
++                 loaded (bug19: 2+ softfp double args mispassed). Same closed
++                 form as the VT_STRUCT branch, from THIS size out of VT_BTYPE
++                 (8 for double, 4 for float) -- NOT type_size, the function
++                 MesCC mis-executes at runtime (do not simplify back to it). */
++              int nw = size >> 2;
++              if (pplan->start + nw > 4)
++                nw = 4 - pplan->start;
++              todo |= ((1 << (pplan->start + nw)) - 1) & ~((1 << pplan->start) - 1);
++              stack_size += size - 4 * nw; /* 0 unless it spills past r3 */
++            }
+           }
+           break;
+ 
+-- 
+2.39.5
