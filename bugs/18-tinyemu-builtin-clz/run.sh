@@ -113,14 +113,27 @@ banner "3/6 -- BUG: tcc on the verbatim softfp.c"
 # tcc accepts the call (as an implicit declaration) and emits a reference to a
 # function that does not exist anywhere -- so the failure only surfaces at link
 # time, as an "undefined symbol" naming a compiler builtin.
+# ABLATION HOOK (AGENTS.md "show the reproducer going red, once"):
+# ABLATE=1 points the BUG leg at the patched source, i.e. at a version where
+# the defect is absent.  The run must then FAIL at the "expected an undefined
+# __builtin_clz" assertion.  Not exercised in CI -- run it by hand when
+# changing this harness.
+BUGSRC=temu-stock
+if [ "${ABLATE:-0}" = 1 ]; then
+  loud "ABLATE=1: pointing the bug leg at the PATCHED source; this run MUST fail"
+  rm -rf temu-ablate && cp -r temu-stock temu-ablate
+  ( cd temu-ablate && patch -p1 --batch < "$BUGDIR/softfp-portable-clz.patch" )
+  BUGSRC=temu-ablate
+fi
 set +e
-$TCC -I temu-stock -c temu-stock/softfp.c -o softfp-tcc-stock.o > tcc-compile.txt 2>&1
+$TCC -I $BUGSRC -c $BUGSRC/softfp.c -o softfp-tcc-stock.o > tcc-compile.txt 2>&1
 tcc_cc_rc=$?
 set -e
 sed 's/^/    /' tcc-compile.txt
 [ "$tcc_cc_rc" = 0 ] || die "tcc failed to even compile softfp.c; expected it to compile with a warning"
 grep -q "implicit declaration of function '__builtin_clz'" tcc-compile.txt \
-  || die "expected tcc to treat __builtin_clz as an implicit declaration"
+  || die "expected tcc to treat __builtin_clz as an implicit declaration \
+(if ABLATE=1 this is the reproducer correctly going red)"
 
 echo "  undefined symbols in the object tcc produced:"
 nm softfp-tcc-stock.o > nm-stock.txt

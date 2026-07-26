@@ -13,5 +13,5 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
-      - name: Reproduce (softfp.c: undefined symbol '__builtin_clz' under tcc)
+      - name: "Reproduce: softfp.c under tcc -> undefined symbol '__builtin_clz'"
         run: bash bugs/18-tinyemu-builtin-clz/run.sh

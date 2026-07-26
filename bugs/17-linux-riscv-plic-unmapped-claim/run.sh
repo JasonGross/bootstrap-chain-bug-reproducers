@@ -84,10 +84,25 @@ fetch "$LINUX_URL" "$LINUX_SHA" "linux-${LINUX_VER}.tar.xz"
 [ -d "linux-${LINUX_VER}" ] || tar -xf "linux-${LINUX_VER}.tar.xz"
 SRC=$WORK/linux-${LINUX_VER}
 
-loud "the same structural check, on the pinned source we build:"
-python3 "$BUGDIR/check-plic-source.py" unfixed "$SRC/$PLIC_REL"
+if [ "${ABLATE:-0}" = 1 ]; then
+  loud "ABLATE=1 -- skipping the pinned-source premise check (see the hook below)"
+else
+  loud "the same structural check, on the pinned source we build:"
+  python3 "$BUGDIR/check-plic-source.py" unfixed "$SRC/$PLIC_REL"
+fi
 
 cd "$SRC"
+# ABLATION HOOK (AGENTS.md "show the reproducer going red, once"):
+# ABLATE=1 applies the fix BEFORE the "stock" build, i.e. points the bug legs at
+# a kernel where the defect is absent.  The run must then FAIL at the
+# `N_POISON_STOCK = 1` assertion.  Not exercised in CI -- run it by hand when
+# changing this harness.
+if [ "${ABLATE:-0}" = 1 ] && [ ! -f .ablated ]; then
+  loud "ABLATE=1: applying the fix before the stock build; this run MUST fail"
+  patch -p1 --forward < "$BUGDIR/plic-complete-unmapped.patch"
+  python3 "$BUGDIR/check-plic-source.py" fixed "$PLIC_REL"
+  touch .ablated
+fi
 if [ ! -f .config.stamped ]; then
   make defconfig >/dev/null
   # Two config decisions are load-bearing; the rest is only build time.
