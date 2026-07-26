@@ -1,0 +1,32 @@
+name: tcc-riscv64-absolute-relocs
+# GREEN == the bug REPRODUCES: tinycc's riscv64 linker still has no case for
+# the ABSOLUTE relocations R_RISCV_HI20 (26) / R_RISCV_LO12_I (27) /
+# R_RISCV_LO12_S (28) -- only their PC-relative siblings -- so a GCC-built
+# riscv64 musl cannot be linked with tcc.  On mob HEAD the link dies with
+# "Unknown relocation type for got: 26/27/28" and produces nothing; on the
+# mes-lineage chain vintage it exits 0 with only "FIXME: handle reloc type
+# 1a/1b/1c" notes and produces a binary that prints NOTHING.
+#
+# Two controls, each the SAME compiler tree plus the same 20-line patch,
+# linking the SAME libc with the SAME four-line trigger: both link cleanly
+# and the program prints "HELLO from a tcc-linked musl binary".
+#
+# The premise ("upstream still lacks these") is re-checked against live mob
+# on every run, so this job goes RED if tinycc fixes it.
+on:
+  push:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 5 1 * *'
+jobs:
+  reproduce:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install riscv64 cross GCC + qemu-user
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q gcc-riscv64-linux-gnu qemu-user-static
+      - name: Reproduce (mob errors out, chain vintage fails silently; +20 lines fixes both)
+        run: bash bugs/16-tcc-riscv64-absolute-relocs/run.sh
