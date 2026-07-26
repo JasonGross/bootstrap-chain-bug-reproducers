@@ -11,12 +11,26 @@ TLS `TPREL_*` variants — but not the **absolute** forms:
 | `R_RISCV_LO12_S` | 28 (`0x1c`) | the store half (`sw`/`sd`) |
 
 All three are named in tcc's own `elf.h`; there is simply no `case` for them
-in `code_reloc()`, `gotplt_entry_type()` or `relocate()`. Two consequences,
-and it matters which one you see: unclassified in `code_reloc()`, they make
-`tccelf.c` raise `Unknown relocation type for got: 26/27/28` *before* the
-linker ever gets to applying them (that is what mob does, leg A); if the
-classifier is passed, `relocate()` drops them into the `default:` branch
-that prints `FIXME: handle reloc type %x` and carries on (leg B).
+in `code_reloc()`, `gotplt_entry_type()` or `relocate()`.
+
+**There are two distinct rejection points, and it matters which one you
+see.** `build_got_entries()` (`tccelf.c:1417`) calls `gotplt_entry_type()`
+at `:1435` and raises `Unknown relocation type for got: %d` at `:1437` —
+*before* `relocate()` is ever reached. So:
+
+- **unclassified** → the GOT-path error, and the link cannot complete at
+  all. That is mob, **leg A**.
+- **classified but unimplemented** → `relocate()`'s `default:` branch prints
+  `FIXME: handle reloc type %x` and carries on, the link *succeeds*, and the
+  binary is silently wrong. That is the fork, **leg B**.
+
+This is why the patch touches both the classifiers and `relocate()`: a diff
+that added only the three `relocate()` cases would still fail on mob at
+`:1437`, having never reached the code it added.
+
+It is also why leg A prints *hundreds* of errors rather than one — `:1437`
+uses `tcc_error_noabort` and `continue`s, so every affected relocation is
+reported before the link finally fails with no output file.
 
 GCC emits these routinely for riscv64 — they are what an ordinary non-PIC
 `lui`/`addi` pair uses — so **any** attempt to link a GCC-built riscv64
