@@ -1,0 +1,17 @@
+--- a/drivers/irqchip/irq-sifive-plic.c
++++ b/drivers/irqchip/irq-sifive-plic.c
+@@ -389,6 +389,14 @@ static void plic_handle_irq(struct irq_desc *desc)
+ 		if (unlikely(err)) {
+ 			pr_warn_ratelimited("%pfwP: can't find mapping for hwirq %lu\n",
+ 					    handler->priv->fwnode, hwirq);
++			/*
++			 * We have claimed this source; if we do not complete it
++			 * the PLIC gateway will never forward it again and the
++			 * line is masked for good.  Complete it so a stray or
++			 * unmapped interrupt is a logged glitch rather than a
++			 * permanent wedge.
++			 */
++			writel(hwirq, claim);
+ 		}
+ 	}
+ 

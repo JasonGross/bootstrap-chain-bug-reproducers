@@ -48,6 +48,7 @@ workflow file).
 | 13 | [`live-bootstrap-riscv64-stale-pins`](bugs/13-live-bootstrap-riscv64-stale-pins/) | [![live-bootstrap-riscv64-stale-pins](../../actions/workflows/live-bootstrap-riscv64-stale-pins.yml/badge.svg)](../../actions/workflows/live-bootstrap-riscv64-stale-pins.yml) | [fosslinux/live-bootstrap](https://github.com/fosslinux/live-bootstrap) — GitHub issue | riscv64 tcc-mes chain (branch `tinyemu-riscv-mes-tcc`) |
 | 14 | [`mes-dtoab-leading-zeros`](bugs/14-mes-dtoab-leading-zeros/) | [![mes-dtoab-leading-zeros](../../actions/workflows/mes-dtoab-leading-zeros.yml/badge.svg)](../../actions/workflows/mes-dtoab-leading-zeros.yml) | GNU Mes (`bug-mes@gnu.org`) | arm gmp-6.2.1 `mpn/perfsqr.h` blowup (2.4 GB) |
 | 15 | [`builder-hex0-riscv64-seed`](bugs/15-builder-hex0-riscv64-seed/) | [![builder-hex0-riscv64-seed](../../actions/workflows/builder-hex0-riscv64-seed.yml/badge.svg)](../../actions/workflows/builder-hex0-riscv64-seed.yml) | **Not a bug** — demonstration for a contribution offer to [builder-hex0](https://github.com/ironmeld/builder-hex0) | riscv64 seed port (`JasonGross/builder-hex0` branch `riscv64-port`) |
+| 17 | [`linux-riscv-plic-unmapped-claim`](bugs/17-linux-riscv-plic-unmapped-claim/) | [![linux-riscv-plic-unmapped-claim](../../actions/workflows/linux-riscv-plic-unmapped-claim.yml/badge.svg)](../../actions/workflows/linux-riscv-plic-unmapped-claim.yml) | Linux — `linux-riscv@lists.infradead.org` (`drivers/irqchip/irq-sifive-plic.c`) | fiwix-riscv64 / tinyemu-retarget Gate P3 (Linux 6.1 freeze after `[vda]`) |
 
 
 ### 1. `mes-ldexp-stub` — GNU Mes' ldexp is a `return 0;` stub
@@ -332,11 +333,66 @@ submodules straight from GitHub rather than through the superproject, because
 its `mescc-tools` submodule lives on `git.savannah.nongnu.org`, which the
 riscv64 chain does not need and which was unreachable while this was written.
 
+### 17. `linux-riscv-plic-unmapped-claim` — a claimed-but-unmapped PLIC source is never completed, and is masked for the rest of the boot
+
+`drivers/irqchip/irq-sifive-plic.c`'s `plic_handle_irq()` claims an interrupt
+by reading the claim register, and on the `generic_handle_domain_irq()` error
+branch — the hwirq has no Linux irqdomain mapping — it warns and moves on
+**without writing the ID back**. The PLIC's per-source gateway will not forward
+that source again until the outstanding claim is completed, so hitting that
+branch once masks the source for the rest of the boot. In the worst case (a
+boot-critical device on that line) the boot hangs, which is how we met it.
+
+The reachable-on-conformant-hardware path is a source numbered **above** the
+device tree's `riscv,ndev`: `__plic_init()` clears the per-context enable bits
+only for `hwirq 1..ndev` and sizes the irqdomain to the same range, so a source
+above `ndev` that a prior stage left enabled and asserted survives Linux's init,
+can never be mapped, and is claimed on the first external interrupt Linux takes.
+(For sources *within* `1..ndev` Linux is safe: it clears their enables at init
+and maps a source before enabling it.)
+
+The workflow runs entirely on **stock `qemu-system-riscv64 -M virt`**, whose
+PLIC is spec-compliant and enable-gated (`hw/intc/sifive_plic.c` claims only
+`pending & ~claimed & enable`, above the context threshold) — nothing here
+leans on an emulator shortcut. It builds a pinned Linux 6.12.1, dumps qemu's own
+device tree and lowers `riscv,ndev` to 9 so that PLIC source 10 (the virt
+machine's UART0) is out of range, and boots through a tiny pre-kernel S-mode
+stub standing in for a prior boot stage. Three stubs × two kernels, everything
+else identical:
+
+| stub | stock kernel | one-line fix |
+|---|---|---|
+| poison — source 10 given priority + enabled for the S-context + asserted | **1** warning | **10** warnings |
+| control — source 10 given priority + enabled, *not* asserted | 0 | 0 |
+| none — stub touches nothing | 0 | 0 |
+
+(counting `can't find mapping for hwirq 10`; all six boots reach a userspace
+marker and power off.)
+
+The **1-vs-many** cell is the bug. The poison source keeps re-asserting — the
+console UART's THRE line goes high again after every character OpenSBI prints,
+and the fixed column is delivered it ten times off that same line — yet the
+stock kernel is delivered it exactly **once**, because the leaked claim latches
+the gateway shut. The two control rows fix the interpretation: enabled but never
+asserted claims nothing, and asserted without the prior stage's enable is not
+deliverable at all. The job also re-reads `plic_handle_irq()` from
+`torvalds/linux` master on every run and fails loudly if a completion appears
+there, so the report cannot rot into a false claim about mainline.
+
+Honest limits, stated in the job's own output: this variant demonstrates
+*reachability and recovery*, not a hang — an above-`ndev` source has no Linux
+driver waiting on it. And because the poison source here is the console UART,
+the fixed kernel's own warning output re-asserts the line, which is also a fair
+caution about the fix itself: completing a still-asserted, permanently-unmapped
+level source means re-delivery until something quiesces it (here bounded by the
+printk rate limiter, and the boot finishes normally).
+
 ## Pinned sources
 
 | Source | Pin |
 |--------|-----|
 | GNU Mes | `mes-0.27.1.tar.gz` from ftp.gnu.org, sha256 `183a40ea…f25d` |
+| Linux | `linux-6.12.1.tar.xz` from cdn.kernel.org, sha256 `0193b1d8…c619` |
 | janneke tinycc fork | gitlab.com/janneke/tinycc @ `ee75a10cd71bebf23cb23598a49ee3c160ef0fe8` (branch `mes-0.25.0`) |
 | mainline tinycc | repo.or.cz/tinycc.git @ `release_0_9_27` = `d348a9a51d32cece842b7885d27a411436d7887b` (fallback when repo.or.cz is down: the official github.com/TinyCC/tinycc mirror; the commit-hash pin is the integrity check either way) |
 | GNU Guile | `guile-2.0.11.tar.xz` from ftp.gnu.org, sha256 `aed0a4a6…03e2` |

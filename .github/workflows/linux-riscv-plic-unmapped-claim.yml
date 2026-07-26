@@ -1,0 +1,25 @@
+name: linux-riscv-plic-unmapped-claim
+# GREEN == the bug REPRODUCES on STOCK qemu-system-riscv64 -M virt (a
+# spec-compliant, enable-gated SiFive PLIC): a PLIC source numbered above the
+# device tree's `riscv,ndev`, left enabled and asserted by a pre-kernel stub,
+# is claimed by plic_handle_irq() with no irqdomain mapping, never completed,
+# and is therefore delivered EXACTLY ONCE for the whole boot.  With the
+# one-line completion added the same still-asserted source is delivered again;
+# with the source enabled-but-not-asserted, or not enabled at all, nothing is
+# claimed.  All six boots reach userspace.
+on:
+  push:
+  workflow_dispatch:
+jobs:
+  reproduce:
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install riscv64 cross toolchain, kernel build deps and qemu
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q gcc-riscv64-linux-gnu qemu-system-misc \
+            flex bison bc libelf-dev libssl-dev cpio xz-utils
+      - name: Reproduce (leaked claim masks the source for the rest of the boot)
+        run: bash bugs/17-linux-riscv-plic-unmapped-claim/run.sh
