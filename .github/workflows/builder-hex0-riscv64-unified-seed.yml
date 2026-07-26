@@ -1,0 +1,21 @@
+name: builder-hex0-riscv64-unified-seed
+# DEMONSTRATION (not a bug reproducer): GREEN == the demonstration SUCCEEDS.
+# ONE unified riscv64 hex0 seed boots on BOTH QEMU 'virt' and TinyEMU at
+# 128 MiB, its runtime probe discriminates the machine, its .S round-trips to
+# the checked-in .hex0, and the real stage0-posix chain produces a
+# BYTE-IDENTICAL M2-Planet on both machines.
+on:
+  push:
+  workflow_dispatch:
+jobs:
+  demonstrate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install qemu-system-riscv64 + riscv64 cross-binutils + xxd
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q qemu-system-misc binutils-riscv64-linux-gnu xxd
+      - name: Demonstrate (one seed -> two machines -> byte-identical M2-Planet)
+        run: bash bugs/22-builder-hex0-riscv64-unified-seed/run.sh

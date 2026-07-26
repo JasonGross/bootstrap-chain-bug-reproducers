@@ -54,6 +54,7 @@ workflow file).
 | 19 | [`tinyemu-plic-not-enable-gated`](bugs/19-tinyemu-plic-not-enable-gated/) | [![tinyemu-plic-not-enable-gated](../../actions/workflows/tinyemu-plic-not-enable-gated.yml/badge.svg)](../../actions/workflows/tinyemu-plic-not-enable-gated.yml) | TinyEMU (Fabrice Bellard; <https://bellard.org/tinyemu/> — no tracker, email the author) | fiwix-riscv64 / tinyemu-retarget Gate P (the manufactured Linux 6.1 boot hang) |
 | 20 | [`tcc-fp-literal-integer-parser`](bugs/20-tcc-fp-literal-integer-parser/) | [![tcc-fp-literal-integer-parser](../../actions/workflows/tcc-fp-literal-integer-parser.yml/badge.svg)](../../actions/workflows/tcc-fp-literal-integer-parser.yml) | janneke tinycc fork — the integer-only FP-literal parser (patch 0013) that cures bug 5's mechanism | arm-pivot milestone-3 tcc (patch 0013; cf. bug 5) |
 | 21 | [`tcc-arm-double-arg-caller`](bugs/21-tcc-arm-double-arg-caller/) | [![tcc-arm-double-arg-caller](../../actions/workflows/tcc-arm-double-arg-caller.yml/badge.svg)](../../actions/workflows/tcc-arm-double-arg-caller.yml) | Internal — validates our patch 0014; the defect is a regression in our own patches 4/5, **not** an upstream tcc bug | arm-pivot tinycc patches 0004/0005/0014 |
+| 22 | [`builder-hex0-riscv64-unified-seed`](bugs/22-builder-hex0-riscv64-unified-seed/) | [![builder-hex0-riscv64-unified-seed](../../actions/workflows/builder-hex0-riscv64-unified-seed.yml/badge.svg)](../../actions/workflows/builder-hex0-riscv64-unified-seed.yml) | **Not a bug** — the UNIFIED-seed sibling of the row 15 demonstration; contribution offer to [builder-hex0](https://github.com/ironmeld/builder-hex0) | one probing seed for both machines (`JasonGross/builder-hex0` branch `riscv64-probing-seed-capabilities`) |
 
 
 ### 1. `mes-ldexp-stub` — GNU Mes' ldexp is a `return 0;` stub
@@ -522,6 +523,29 @@ validate our patch 0014. Stock upstream carries the register-restore bitmap
 through untouched and is correct, so there is nothing to report here — this is
 internal validation only.
 
+### 22. `builder-hex0-riscv64-unified-seed` — DEMONSTRATION: ONE hex0 seed, two riscv64 machines, byte-identical chain output
+
+**This entry is not a bug** and, like row 15, it inverts the repo's convention:
+**green means the demonstration succeeded.** It is the *unified-seed* sibling of
+row 15. Row 15 shows two independently-targeted seeds — one built for QEMU
+`virt`, one for TinyEMU — agree; this shows a **single** seed that detects its
+machine at runtime and agrees with itself across both. The workflow asserts four
+things. **Round-trip:** the seed's `.S` regenerates the checked-in `.hex0` (the
+fork's own oracle), so the hand-auditable hex is provably the machine code that
+boots. **One seed, both machines, 128 MiB:** the same binary boots on QEMU
+`virt` and on TinyEMU, each at 128 MiB — the seed carries an additive capability
+layer (an M-mode kexec service) that imposes nothing on the bootstrap path, so
+the stage0 chain still runs on a small machine. **Probe discriminated:** the
+same binary prints the qemu-virt banner on QEMU and the TinyEMU banner on
+TinyEMU, each on that machine's own console. **Byte-identical output:** the real
+pinned stage0-posix chain runs to M2-Planet on both, both outputs are non-empty,
+and the two are byte-identical to each other. Equality is the whole claim — no
+fixed hash is cited, so it reproduces for anyone cloning this. A recorded
+red-for-the-right-reason (`ABLATE=1`/`ABLATE=2`, run once at authoring time, not
+on every CI invocation) confirms the discrimination and equality assertions each
+go red on their own named failure rather than on a build error. Harness in
+[`bugs/22-builder-hex0-riscv64-unified-seed/`](bugs/22-builder-hex0-riscv64-unified-seed/).
+
 ## Pinned sources
 
 | Source | Pin |
@@ -537,6 +561,7 @@ internal validation only.
 | NYACC | `nyacc-1.00.2.tar.gz` from download.savannah.nongnu.org, sha256 `f36e4fb7…b318` |
 | mescc-tools | `mescc-tools-1.7.0.tar.gz` from download.savannah.nongnu.org, sha256 `b682f7bf…575c` |
 | builder-hex0 (riscv64 port) | github.com/JasonGross/builder-hex0 @ `dfc103e6…f205bb` (branch `riscv64-port`) |
+| builder-hex0 (unified probing seed) | github.com/JasonGross/builder-hex0 @ `9589b9be…804aff` (branch `riscv64-probing-seed-capabilities`) |
 | stage0-posix (riscv64 chain) | oriansj submodules, pinned: `stage0-posix-riscv64` `4688bc66…f72e`, `M2libc` `95e90061…160e`, `M2-Planet` `cadf52af…209a`, `bootstrap-seeds` `cedec6b8…80ed` |
 | TinyEMU | `tinyemu-2019-12-21.tar.gz` from bellard.org, sha256 `be8351f2…5555` |
 | tcc (mes lineage) | lilypond.org/janneke/tcc `tcc-0.9.26-1147-gee75a10c.tar.gz` sha256 `6b8cbd0a…e819f` (= live-bootstrap's own pin) and `tcc-0.9.26-1157-gdd46e018.tar.gz` sha256 `3748c0aa…2232e` |
