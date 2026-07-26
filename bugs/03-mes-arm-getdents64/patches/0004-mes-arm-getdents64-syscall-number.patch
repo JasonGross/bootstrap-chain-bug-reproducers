@@ -1,0 +1,27 @@
+From: Jason Gross <jason@theorem.dev>
+Subject: [PATCH] mes/arm: correct SYS_getdents64 syscall number (0xdc -> 0xd9)
+
+include/linux/arm/syscall.h defined SYS_getdents64 as 0xdc (220) -- the x86
+value, copied onto the ARM table. On ARM EABI, syscall 220 is madvise;
+getdents64 is 217 (0xd9). The mes libc getdents() (lib/linux/getdents.c,
+also inlined in libc.c) prefers SYS_getdents64 whenever it is defined, so on
+arm it invoked madvise(dirfd, buffer, nbytes) -> EINVAL. readdir() therefore
+left errno=EINVAL after end-of-directory, and GNU make (which checks errno
+after its readdir loop) aborted every build with
+
+    make: *** INTERNAL: readdir: error 22
+
+before compiling anything. Cross-checked against the musl arch/arm syscall
+table: getdents64 is the sole number that disagrees.
+---
+--- a/include/linux/arm/syscall.h
++++ b/include/linux/arm/syscall.h
+@@ -106,7 +106,7 @@
+ #define SYS_lstat64    0xc4
+ #define SYS_fstat64    0xc5
+ #define SYS_fcntl64    0xdd
+-#define SYS_getdents64 0xdc
++#define SYS_getdents64 0xd9
+ 
+ #undef SYS_stat
+ #define SYS_stat SYS_stat64

@@ -1,7 +1,8 @@
 name: mes-arm-getdents64
 # GREEN == the bug REPRODUCES: mes' arm SYS_getdents64 (0xdc=220, the x86
 # number) mismatches the kernel's arm table (217), and behaviorally lands on
-# madvise under qemu-arm.
+# madvise under qemu-arm -- AND the fix patch 0004 applies to a pristine
+# mes-0.27.1 with strict `git am` and GNU `patch` (with corruption controls).
 on:
   push:
   workflow_dispatch:
