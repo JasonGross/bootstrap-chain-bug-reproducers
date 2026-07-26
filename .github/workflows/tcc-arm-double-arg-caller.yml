@@ -1,0 +1,22 @@
+name: tcc-arm-double-arg-caller
+# GREEN == patch 0014 is VERIFIED: our own patches 4/5 regress the arm softfp
+# caller so a call passing 2+ doubles drops the `pop {r0,r1,r2,r3}` and mis-
+# passes its arguments (bug19); patch 0014 restores the pop -- byte-identically
+# to stock codegen -- and the doubles then arrive correctly at a gcc-built
+# (independent-ABI) receiver run under qemu-arm.  STOCK (pristine fork) is the
+# correct control; upstream tcc is unaffected.
+on:
+  push:
+  workflow_dispatch:
+jobs:
+  reproduce:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install arm cross toolchain + qemu-user
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q gcc-arm-linux-gnueabihf qemu-user-static
+      - name: "Verify patch 0014 (softfp double-arg caller) restores the marshalling"
+        run: bash bugs/21-tcc-arm-double-arg-caller/run.sh

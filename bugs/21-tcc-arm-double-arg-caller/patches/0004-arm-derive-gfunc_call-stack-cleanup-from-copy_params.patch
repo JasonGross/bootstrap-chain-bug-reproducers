@@ -1,0 +1,135 @@
+From d0710b7529334800a0df5d362bc0e673b390eec1 Mon Sep 17 00:00:00 2001
+From: Jason Gross <jason@theorem.dev>
+Date: Thu, 16 Jul 2026 02:40:00 +0000
+Subject: [PATCH] arm: derive gfunc_call stack cleanup from copy_params' actual
+ pushes
+
+MesCC (which this fork exists to be compiled by) miscompiles the value
+assign_regs() returns -- the total stacked-argument size nsaa -- for any
+call with two or more stacked arguments (six or more total args, since
+AAPCS passes the first four in r0-r3). The returned size comes out about
+16 bytes too large, so gfunc_call's post-call `gadd_sp(args_size)` leaves
+sp high and the next call's `push {r0-r3}` argument spill overwrites the
+caller's frame. When tcc compiles itself this corrupts new_symtab's
+nb_syms across a 7-argument put_elf_sym call and crashes in a huge memset
+past the brk. A one-argument call such as printf("literal") is unaffected,
+so a small hello runs while self-host does not.
+
+MesCC pushes the correct argument bytes; only the returned size is wrong.
+So stop trusting assign_regs' return: have copy_params accumulate the
+bytes it actually pushes for stacked arguments (a plain int accumulator
+returned through an out-pointer -- no ternary, compound literal, or
+expression in a call argument, i.e. none of the shapes MesCC mishandles),
+and clean up that plus the EABI alignment pad.
+
+The rewrite is byte-identical to the original under gcc across
+int/struct/spanning-struct/long-long/double argument shapes (verified
+against a gcc-built tcc of this source), so it changes no emitted
+instruction under a correct compiler -- it only removes the dependence on
+the value MesCC miscompiles. We will report the underlying MesCC bug
+separately with reproducers, alongside the cond?0:expr ternary limitation
+that patch 3 works around.
+
+Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_0135X6tRviSFCswBbHXxQofc
+---
+ arm-gen.c | 35 ++++++++++++++++++++++++++++-------
+ 1 file changed, 28 insertions(+), 7 deletions(-)
+
+diff --git a/arm-gen.c b/arm-gen.c
+index 1328ea3..0560b6b 100644
+--- a/arm-gen.c
++++ b/arm-gen.c
+@@ -1084,9 +1084,12 @@ static int assign_regs(int nb_args, int float_abi, struct plan *plan, int *todo)
+    todo: a bitmap indicating what core reg will hold a parameter
+ 
+    Returns the number of SValue added by this function on the value stack */
+-static int copy_params(int nb_args, struct plan *plan, int todo)
++static int copy_params(int nb_args, struct plan *plan, int todo, int *ret_stack_size)
+ {
+   int size, align, r, i, nb_extra_sval = 0;
++  int stack_size = 0; /* bytes actually pushed for stacked params; the caller
++                         cleans up exactly this instead of assign_regs' returned
++                         nsaa, which MesCC miscompiles for 2+ stacked args. */
+   struct param_plan *pplan;
+   int pass = 0;
+ 
+@@ -1129,6 +1132,12 @@ again:
+             size += padding; /* Add padding if any */
+             /* allocate the necessary size on stack */
+             gadd_sp(-size);
++            if (i == STACK_CLASS)
++              stack_size += size; /* pushed struct (incl. leading padding) */
++            else if (i == CORE_STRUCT_CLASS)
++              /* spanning struct: pop {todo} below removes the reg words; only
++                 the spill past r0-r3 stays for the callee. */
++              stack_size += size - 4 * (pplan->end - pplan->start);
+             /* generate structure store */
+             r = get_reg(RC_INT);
+             o(0xE28D0000|(intr(r)<<12)|padding); /* add r, sp, padding */
+@@ -1188,8 +1197,13 @@ again:
+               r = gv(RC_INT);
+               o(0xE52D0004|(intr(r)<<12)); /* push r */
+             }
+-            if (i == STACK_CLASS && pplan->prev)
+-              gadd_sp(pplan->prev->end - pplan->start); /* Add padding if any */
++            if (i == STACK_CLASS) {
++              stack_size += size; /* pushed 4 (or 8 for llong) bytes */
++              if (pplan->prev) {
++                gadd_sp(pplan->prev->end - pplan->start); /* Add padding if any */
++                stack_size -= pplan->prev->end - pplan->start; /* count that pad */
++              }
++            }
+           }
+           break;
+ 
+@@ -1245,6 +1259,7 @@ again:
+       }
+     }
+   }
++  *ret_stack_size = stack_size;
+   return nb_extra_sval;
+ }
+ 
+@@ -1254,6 +1269,7 @@ again:
+ void gfunc_call(int nb_args)
+ {
+   int r, args_size;
++  int stack_size, align_pad;
+   int def_float_abi = float_abi;
+   int todo;
+   struct plan plan;
+@@ -1276,21 +1292,26 @@ void gfunc_call(int nb_args)
+ 
+   args_size = assign_regs(nb_args, float_abi, &plan, &todo);
+ 
++  align_pad = 0;
+ #ifdef TCC_ARM_EABI
+   if (args_size & 7) { /* Stack must be 8 byte aligned at fct call for EABI */
+-    args_size = (args_size + 7) & ~7;
+     o(0xE24DD004); /* sub sp, sp, #4 */
++    align_pad = 4;
+   }
+ #endif
+ 
+-  nb_args += copy_params(nb_args, &plan, todo);
++  stack_size = 0;
++  nb_args += copy_params(nb_args, &plan, todo, &stack_size);
+   tcc_free(plan.pplans);
+ 
+   /* Move fct SValue on top as required by gcall_or_jmp */
+   vrotb(nb_args + 1);
+   gcall_or_jmp(0);
+-  if (args_size)
+-      gadd_sp(args_size); /* pop all parameters passed on the stack */
++  stack_size += align_pad;
++  if (stack_size)
++      gadd_sp(stack_size); /* pop stacked params + EABI alignment pad; size from
++                              copy_params' actual pushes (MesCC miscompiles the
++                              nsaa assign_regs returns for 2+ stacked args). */
+ #if defined(TCC_ARM_EABI) && defined(TCC_ARM_VFP)
+   if(float_abi == ARM_SOFTFP_FLOAT && is_float(vtop->type.ref->type.t)) {
+     if((vtop->type.ref->type.t & VT_BTYPE) == VT_FLOAT) {
+-- 
+2.39.5
+
