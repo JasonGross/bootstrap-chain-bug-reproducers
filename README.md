@@ -358,27 +358,45 @@ PLIC is spec-compliant and enable-gated (`hw/intc/sifive_plic.c` claims only
 leans on an emulator shortcut. It builds a pinned Linux 6.12.1, dumps qemu's own
 device tree and lowers `riscv,ndev` to 9 so that PLIC source 10 (the virt
 machine's UART0) is out of range, and boots through a tiny pre-kernel S-mode
-stub standing in for a prior boot stage. Three stubs × two kernels, everything
-else identical:
+stub standing in for a prior boot stage. Four configurations × two kernels,
+everything else identical:
 
-| stub | stock kernel | one-line fix |
+| leg | stock kernel | one-line fix |
 |---|---|---|
-| poison — source 10 given priority + enabled for the S-context + asserted | **1** warning | **10** warnings |
-| control — source 10 given priority + enabled, *not* asserted | 0 | 0 |
-| none — stub touches nothing | 0 | 0 |
+| poison, **above** `ndev=9` — source 10 given priority, enabled for the S-context, asserted | **1** warning | **10** warnings |
+| poison, **in range** — the identical stub against qemu's own unmodified `riscv,ndev` | 0 | 0 |
+| control, above `ndev` — source 10 prioritised + enabled, *not* asserted | 0 | 0 |
+| none, above `ndev` — stub touches nothing | 0 | 0 |
 
-(counting `can't find mapping for hwirq 10`; all six boots reach a userspace
+(counting `can't find mapping for hwirq 10`; all eight boots reach a userspace
 marker and power off.)
 
-The **1-vs-many** cell is the bug. The poison source keeps re-asserting — the
-console UART's THRE line goes high again after every character OpenSBI prints,
-and the fixed column is delivered it ten times off that same line — yet the
-stock kernel is delivered it exactly **once**, because the leaked claim latches
-the gateway shut. The two control rows fix the interpretation: enabled but never
-asserted claims nothing, and asserted without the prior stage's enable is not
-deliverable at all. The job also re-reads `plic_handle_irq()` from
+Row 1 vs **row 2** answers the maintainer's first question — *why didn't
+`__plic_init()` clear it?* — by measurement rather than by reading the source:
+the identical stub against qemu's own device tree is completely neutralised,
+because the clear-enables loop covers `hwirq 1..ndev`. Only above `ndev` does
+the prior stage's enable survive into Linux.
+
+The **1-vs-many** cell in row 1 is the bug itself. The poison source keeps
+re-asserting — the console UART's THRE line goes high again after every
+character OpenSBI prints, and the fixed column is delivered it ten times off
+that same line — yet the stock kernel is delivered it exactly **once**, because
+the leaked claim latches the gateway shut. Rows 3 and 4 fix the interpretation:
+enabled but never asserted claims nothing, and asserted without the prior
+stage's enable is not deliverable at all.
+
+Every leg asserts Linux's own `mapped N interrupts` line, i.e. that it really
+sized its irqdomain from the device tree that leg intended — without which a
+failed DTB edit would leave source 10 *in* range, still produce the warning
+(an in-range source with no driver is unmapped too), and quietly unsupport the
+report's central claim. The job also re-reads `plic_handle_irq()` from
 `torvalds/linux` master on every run and fails loudly if a completion appears
 there, so the report cannot rot into a false claim about mainline.
+
+*Ablated 2026-07-26* (`ABLATE=1 bash bugs/17-linux-riscv-plic-unmapped-claim/run.sh`,
+run by hand, not in CI): applying the fix before the "stock" build points the bug
+legs at a kernel where the defect is absent, and the run dies at the named
+assertion `expected EXACTLY 1 unmapped-claim warning on the stock kernel, got 10`.
 
 Honest limits, stated in the job's own output: this variant demonstrates
 *reachability and recovery*, not a hang — an above-`ndev` source has no Linux
@@ -419,6 +437,11 @@ fallback costs GCC and Clang builds nothing. Because TinyEMU ships as a tarball
 from one host with no VCS and no tracker, the staleness guard is "is the release
 at that URL still the one we pinned, and does its `softfp.c` still carry the
 construct?".
+
+*Ablated 2026-07-26* (`ABLATE=1 bash bugs/18-tinyemu-builtin-clz/run.sh`, run by
+hand, not in CI): pointing the bug leg at the patched source makes the run die at
+the named assertion `expected tcc to treat __builtin_clz as an implicit
+declaration`.
 
 ## Pinned sources
 
