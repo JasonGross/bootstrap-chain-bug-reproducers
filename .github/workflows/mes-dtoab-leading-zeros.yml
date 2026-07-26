@@ -1,0 +1,15 @@
+name: mes-dtoab-leading-zeros
+# GREEN == the bug REPRODUCES: mes libc's float->decimal routine drops the
+# fraction's leading zeros, so 3.0009 prints as "3.9" and 0.005/0.05/0.5 all
+# print as "0.5"; host libc control is correct.
+on:
+  push:
+  workflow_dispatch:
+jobs:
+  reproduce:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Reproduce (3.0009 -> "3.9"; 0.005/0.05/0.5 all -> "0.5")
+        run: bash bugs/14-mes-dtoab-leading-zeros/run.sh

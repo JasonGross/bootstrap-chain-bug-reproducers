@@ -35,6 +35,7 @@ workflow file).
 | 11 | [`gash-utils-find-expressions`](bugs/11-gash-utils-find-expressions/) | [![gash-utils-find-expressions](../../actions/workflows/gash-utils-find-expressions.yml/badge.svg)](../../actions/workflows/gash-utils-find-expressions.yml) | Gash-Utils (Timothy Sample; `gash-devel@nongnu.org` — gash-utils lives on Savannah cgit, NOT the Codeberg gash repo) | arm-commencement gcc-4.7.4 C++ rung (truncated `libstdc++.a`) |
 | 12 | [`bootar-xz-multiblock`](bugs/12-bootar-xz-multiblock/) | [![bootar-xz-multiblock](../../actions/workflows/bootar-xz-multiblock.yml/badge.svg)](../../actions/workflows/bootar-xz-multiblock.yml) | Bootar + r6rs-compression (Timothy Sample, `samplet@ngyro.com`; no issue tracker — cgit); possibly also [weinholt/compression](https://github.com/weinholt/compression) | arm-commencement gcc-10.5.0.tar.xz unpack failure (STATUS.md 2849-2896) |
 | 13 | [`live-bootstrap-riscv64-stale-pins`](bugs/13-live-bootstrap-riscv64-stale-pins/) | [![live-bootstrap-riscv64-stale-pins](../../actions/workflows/live-bootstrap-riscv64-stale-pins.yml/badge.svg)](../../actions/workflows/live-bootstrap-riscv64-stale-pins.yml) | [fosslinux/live-bootstrap](https://github.com/fosslinux/live-bootstrap) — GitHub issue | riscv64 tcc-mes chain (branch `tinyemu-riscv-mes-tcc`) |
+| 14 | [`mes-dtoab-leading-zeros`](bugs/14-mes-dtoab-leading-zeros/) | [![mes-dtoab-leading-zeros](../../actions/workflows/mes-dtoab-leading-zeros.yml/badge.svg)](../../actions/workflows/mes-dtoab-leading-zeros.yml) | GNU Mes (`bug-mes@gnu.org`) | arm gmp-6.2.1 `mpn/perfsqr.h` blowup (2.4 GB) |
 
 ### 1. `mes-ldexp-stub` — GNU Mes' ldexp is a `return 0;` stub
 
@@ -274,6 +275,26 @@ the job deliberately does **not** do (too slow for CI, and stated in the log)
 is rebuild tcc to show that the 1157 lineage reproduces the pinned `crt1.o`
 `cc417e9d…` byte-exactly — the fact that makes the set "mixed-era" rather than
 merely stale; that remains local evidence.
+
+### 14. `mes-dtoab-leading-zeros` — mes libc's float→decimal drops the fraction's leading zeros (the *output* half of the FP problem)
+
+`lib/mes/dtoab.c` is what mes libc's `printf("%f")` calls
+(`vfprintf.c` case `'f'` is literally `char *s = dtoab (d, 10, 1);`). It
+computes the fraction as `long f = (d - (double) i) * (double) 100000000;`
+and then prints `f` **as an integer**, with no zero padding — so every
+*leading* zero of the fraction is lost and the decimal point moves one place
+per dropped zero. `1.0625` renders as `"1.625"` (10× off), `3.0009` as
+`"3.9"` (**1000× off**), and `0.005`, `0.05` and `0.5` **all render as
+`"0.5"`** — output that cannot be read back as the value it had. Trailing
+zeros are then stripped, so `2.00000001` renders as `"2"`, losing the
+fraction entirely. This is the exact mirror of bug 2 (`abtod`, the *input*
+side): both lose the position of the decimal point. It matters because
+build-time **generators** print floats: in the nix-bootstrapping arm ladder
+the same class of defect (there through the boot musl rather than mes) made
+GMP's `gen-psqr` write a **2.4 GB** `mpn/perfsqr.h` whose header comment read
+`0+00%` instead of `82.81%`, failing the build with "perfsqr.h is too large".
+Bugs 5 and 10 are the input half of the same disease; a bootstrap has neither
+half in working order.
 
 ## Pinned sources
 
