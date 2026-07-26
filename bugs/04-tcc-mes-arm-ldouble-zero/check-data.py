@@ -8,7 +8,9 @@ data.bin = the raw .data section of ldconst.o:
 buggy   : assert big is ALL ZERO (empty VT_LDOUBLE store) and frac is the
           converting-store integer 2 (0x0000000000000002).
 control : assert big == IEEE-754 1e9 (0x41CDCD6500000000) and frac == 2.5
-          (0x4004000000000000).
+          (0x4004000000000000).  Used both for the arm-gcc control and for the
+          fork tcc REBUILT with patches 0011+0012 -- the point of the fixed leg
+          is that it now lands on exactly the control's bytes.
 """
 import struct
 import sys
@@ -37,7 +39,6 @@ if mode == "buggy":
 elif mode == "control":
     assert big == struct.pack("<d", 1e9), big.hex()
     assert frac == struct.pack("<d", 2.5), frac.hex()
-    print("  -> CONTROL OK: gcc materializes 0x41CDCD6500000000 (1e9) and "
-          "0x4004000000000000 (2.5)")
+    print("  -> CORRECT: 0x41CDCD6500000000 (1e9) and 0x4004000000000000 (2.5)")
 else:
     sys.exit("mode must be buggy|control")

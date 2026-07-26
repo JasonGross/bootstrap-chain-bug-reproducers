@@ -1,0 +1,76 @@
+From 0000000000000000000000000000000000000012 Mon Sep 17 00:00:00 2001
+From: Jason Gross <jason@theorem.dev>
+Date: Sat, 18 Jul 2026 07:45:00 +0000
+Subject: [PATCH] arm: init_putv must store long double constants, not skip them
+
+Companion to patch 0011 (which fixed the VT_FLOAT/VT_DOUBLE bootstrap
+arms). init_putv()'s `case VT_LDOUBLE` has, under `#if BOOTSTRAP &&
+__arm__` (present in the mes-0.27 base fork, not added by this series),
+an EMPTY stub:
+
+    case VT_LDOUBLE:
+        if (sizeof(long double) == LDOUBLE_SIZE)
+    #if !(BOOTSTRAP && __arm__)
+            *(long double *)ptr = vtop->c.ld;
+    #else
+        {
+          // XXX TODO: breaks on mescc/tcc-mes based build
+        }
+    #endif
+        else if (sizeof(double) == LDOUBLE_SIZE)
+            *(double *)ptr = (double)vtop->c.ld;
+        ...
+
+On ARM EABI `long double == double == 8 bytes`, so `LDOUBLE_SIZE` is 8
+(arm-gen.c) and `sizeof(long double) == LDOUBLE_SIZE` is true: control
+enters the empty branch and never reaches the working
+`else if (sizeof(double) == LDOUBLE_SIZE)` fallback. The `.data` slot,
+already zero-filled by section_reserve(), is left untouched -- so every
+long double constant a bootstrap arm tcc materializes lands as 0.0.
+
+This is invisible to the self-host fixpoint (tcc.c materializes no long
+double constants) but corrupts long-double-heavy code compiled by the
+bootstrap tcc. Concretely it zeros musl __floatscan's
+`1000000000.0L` digit-assembly constant (floatscan.c:262), which is one
+of several defects that break the from-seed tcc's decimal FP handling.
+
+Fix it the same way patch 0011 fixes VT_DOUBLE: bit-copy the two words
+through the CValue union's integer view (`tab[]`, which aliases `ld` and
+is int[LDOUBLE_SIZE/4] = int[2] here). No FP store, no conversion, only
+idioms MesCC already compiles. A gcc build is unaffected (it never takes
+the bootstrap arm).
+
+NOTE: this patch is necessary but not by itself sufficient to make the
+from-seed arm tcc parse fractional FP literals correctly -- the decimal
+strtod / hex-float `ldexp` paths carry a separate, deeper defect (MesCC
+compiles all floating point as 32-bit integer, so mes libc's ldexp stub
+and strtod backend cannot work under it; reported separately). It is
+included as a genuine, independently-correct bug fix.
+---
+ tccgen.c | 13 ++++++++-----
+ 1 file changed, 8 insertions(+), 5 deletions(-)
+
+diff --git a/tccgen.c b/tccgen.c
+index ba26b7d..ffc863b 100644
+--- a/tccgen.c
++++ b/tccgen.c
+@@ -6402,11 +6402,14 @@ static void init_putv(CType *type, Section *sec, unsigned long c)
+ 		    *(long double *)ptr = vtop->c.ld;
+ #else
+                 {
+-                  // XXX TODO: breaks on mescc/tcc-mes based build
+-                  // maybe disable with HAVE_LONG_DOUBLE?
+-                  //struct long_double *ldptr = ptr;
+-                  //struct long_double tmp = (struct long_double)vtop->c.ld;
+-                  //*ldptr = (struct long_double)tmp;
++                  /* long double == double (8 bytes) on ARM EABI, so
++                     LDOUBLE_SIZE==8 and c.tab[] (int[LDOUBLE_SIZE/4]) holds
++                     the full IEEE representation. Bit-copy via the union's
++                     int view, as patch 0011 does for VT_DOUBLE; the old empty
++                     stub left every long double constant as 0.0. */
++                  unsigned *uptr = ptr;
++                  uptr[0] = vtop->c.tab[0];
++                  uptr[1] = vtop->c.tab[1];
+                 }
+ #endif
+ 		else if (sizeof(double) == LDOUBLE_SIZE)
