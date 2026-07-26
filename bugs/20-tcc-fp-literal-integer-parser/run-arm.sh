@@ -20,8 +20,18 @@
 #
 # GREEN == all of that holds.  Correct-behaviour controls: the healthy column and
 # the buggy+poison all-zero control.  Ablation (ABLATE=1) points the fixed+poison
-# checks at the buggy compiler; the named "0013 delivers exact under poison"
-# assertion must then fire.
+# checks at the buggy compiler; the named "THE FIX FAILED" assertion must then fire.
+#
+# ABLATION RECORD (authoring-time; NOT run on every CI invocation -- it is wired to
+# the workflow's `ablate_arm` dispatch input so it can be re-run on demand without a
+# code change).  Demonstrated red-for-the-right-reason on the real Debian arm vehicle
+# at authoring time: with ABLATE=1 the `THE FIX FAILED: fixed+poison not exact for
+# <lit>` line fires for EVERY literal including all long-double `L` ones (each 0.0 !=
+# oracle) and the run dies on FATAL "battery expectations failed" -- a built-then-
+# failed-assertion red, not a build/empty-output red -- while the sibling host->arm
+# `reproduce` job stays green.  It also matches, byte-for-byte, an independent
+# arm-gcc-10.5 hand-run on a second vehicle.  So the healthy leg's green badge means
+# "the harness would have noticed if 0013 were absent", not merely "it ran".
 cd "$(dirname "$0")"
 . ../common.sh
 BUGDIR=$PWD
