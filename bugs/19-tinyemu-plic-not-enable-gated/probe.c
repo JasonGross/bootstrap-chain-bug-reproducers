@@ -1,6 +1,6 @@
 /*
  * PLIC register-presence probe for the TinyEMU "not enable-gated" finding
- * (docs/upstream/tinyemu-plic-not-enable-gated.md, board row 20).
+ * (bug 19 in this repository's README).
  *
  * Writes a known pattern to three PLIC registers that a spec-compliant PLIC
  * implements -- a per-source PRIORITY, a per-context ENABLE bitmask, and a

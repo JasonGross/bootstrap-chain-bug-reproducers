@@ -9,7 +9,7 @@
 # (default: break), so a guest can be interrupted by, and can claim, a source it
 # never enabled.  On real silicon that is impossible; the divergence is not
 # merely lenient -- it can MANUFACTURE a hang conformant hardware would not (see
-# docs/upstream/tinyemu-plic-not-enable-gated.md).  This reproducer demonstrates
+# this bug's entry in the repository README).  This reproducer demonstrates
 # the root property directly: the gating registers are absent.
 #
 # GREEN == all of these hold, on the verbatim pinned TinyEMU release:
@@ -131,10 +131,11 @@ loud "plic_read returns 0 for every offset except the claim register"
 # ---------------------------------------------------------------------------
 banner "3/5 -- build temu from the pinned tarball (host gcc, no SDL/net/x86)"
 # ---------------------------------------------------------------------------
-# temu's Makefile uses `ifdef` for its CONFIG knobs, so `make CONFIG_SDL=` does
-# NOT disable them (an empty command-line value is still "defined").  Comment
-# the lines instead.  Keep CONFIG_INT128 -- host gcc has __int128.  We build
-# only the `temu` target, which needs no SDL / libcurl / openssl.
+# temu's Makefile uses `ifdef` for its CONFIG knobs.  An empty command-line
+# override (`make CONFIG_SDL=`) makes `ifdef` false, so it disables them too;
+# this script comments the lines in the Makefile instead, to the same effect.
+# Keep CONFIG_INT128 -- host gcc has __int128.  We build only the `temu`
+# target, which needs no SDL / libcurl / openssl.
 sed -i -E 's/^(CONFIG_FS_NET=y)/#\1/; s/^(CONFIG_SDL=y)/#\1/; s/^(CONFIG_SLIRP=y)/#\1/; s/^(CONFIG_X86EMU=y)/#\1/' temu-stock/Makefile
 grep -qE '^#CONFIG_SDL=y' temu-stock/Makefile || die "sed did not disable CONFIG_SDL (Makefile changed?)"
 ( cd temu-stock && make temu -j"$(nproc)" ) > temu-build.log 2>&1 \
@@ -213,6 +214,6 @@ cat <<EOF
 
   temu has no PLIC enable/priority/threshold gating: a source it never enabled
   is deliverable and claimable.  That is the property behind the manufactured
-  boot hang in docs/upstream/tinyemu-plic-not-enable-gated.md.
+  boot hang described in this bug's entry in the repository README.
 EOF
 loud "REPRODUCED: TinyEMU's PLIC is not enable-gated; qemu (spec-compliant) is."
