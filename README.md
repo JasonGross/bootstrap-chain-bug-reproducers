@@ -55,6 +55,7 @@ workflow file).
 | 20 | [`tcc-fp-literal-integer-parser`](bugs/20-tcc-fp-literal-integer-parser/) | [![tcc-fp-literal-integer-parser](../../actions/workflows/tcc-fp-literal-integer-parser.yml/badge.svg)](../../actions/workflows/tcc-fp-literal-integer-parser.yml) | janneke tinycc fork — the integer-only FP-literal parser (patch 0013) that cures bug 5's mechanism | arm-pivot milestone-3 tcc (patch 0013; cf. bug 5) |
 | 21 | [`tcc-arm-double-arg-caller`](bugs/21-tcc-arm-double-arg-caller/) | [![tcc-arm-double-arg-caller](../../actions/workflows/tcc-arm-double-arg-caller.yml/badge.svg)](../../actions/workflows/tcc-arm-double-arg-caller.yml) | Internal — validates our patch 0014; the defect is a regression in our own patches 4/5, **not** an upstream tcc bug | arm-pivot tinycc patches 0004/0005/0014 |
 | 22 | [`builder-hex0-riscv64-unified-seed`](bugs/22-builder-hex0-riscv64-unified-seed/) | [![builder-hex0-riscv64-unified-seed](../../actions/workflows/builder-hex0-riscv64-unified-seed.yml/badge.svg)](../../actions/workflows/builder-hex0-riscv64-unified-seed.yml) | **Not a bug** — the UNIFIED-seed sibling of the row 15 demonstration; contribution offer to [builder-hex0](https://github.com/ironmeld/builder-hex0) | one probing seed for both machines (`JasonGross/builder-hex0` branch `riscv64-probing-seed-capabilities`) |
+| 23 | [`mes-abtod-negative-exponent`](bugs/23-mes-abtod-negative-exponent/) | [![mes-abtod-negative-exponent](../../actions/workflows/mes-abtod-negative-exponent.yml/badge.svg)](../../actions/workflows/mes-abtod-negative-exponent.yml) | GNU Mes (`bug-mes@gnu.org`); context for the riscv64 bootstrap chain ([codeberg.org/ekaitz-zarraga/commencement.scm](https://codeberg.org/ekaitz-zarraga/commencement.scm)) -- completes the mes-abtod story of rows 1/2 | riscv64 flex/log10 root cause (branch `flex-tcc-rootcause`, `data/riscv64-flex-log10/`) |
 
 
 ### 1. `mes-ldexp-stub` — GNU Mes' ldexp is a `return 0;` stub
@@ -546,6 +547,36 @@ on every CI invocation) confirms the discrimination and equality assertions each
 go red on their own named failure rather than on a build error. Harness in
 [`bugs/22-builder-hex0-riscv64-unified-seed/`](bugs/22-builder-hex0-riscv64-unified-seed/).
 
+### 23. `mes-abtod-negative-exponent` — Mes' abtod applies negative exponents one decade short (the riscv64 flex/log10 mechanism)
+
+`lib/mes/abtod.c` applies the decimal exponent with
+`if (e < 0) while (e++) d = d / dbase;` followed by `while (e--) d = d * dbase;`.
+The post-increment fires on the loop-exiting test too, so the divide loop ends
+with `e == 1` and the multiply loop then scales back up once: a negative
+exponent `-n` is applied as 10^(1-n), and `e-01` is a no-op — `"5e-1"` parses
+as `5.0`. Composed with the two defects of reproducer #2 (whole fraction
+divided by 10 once; 32-bit wrap), musl-1.1.24's own `log10.c` constants —
+grepped out of the pinned musl tarball before the run, so the stimulus is
+provably real — parse to exact garbage: `log10_2hi` (`3.01029995663611771306e-01`)
+becomes `137191264.8` (bits `41a05abec199999a`). Any compiler whose FP-literal
+parsing defers to the runtime strtod of the libc it links (TinyCC's
+`parse_number` does exactly that) bakes these values into everything it
+compiles. In the riscv64 full-source bootstrap this is what broke flex 2.5.39
+on GCC's `gengtype-lex.l`: flex sizes a per-start-condition allocation with
+`(int)(1 + log10(i))`, and the workflow asserts that arithmetic lands on
+exactly `137191265` — the failing ~137 MB allocation behind
+`flex: fatal internal error, allocation of macro definition failed`.
+The workflow compiles `abtod.c`/`abtol.c`/`isnumber.c` verbatim from the
+mes-0.27.1 tarball with host gcc, asserts every buggy value bit-for-bit
+against host `strtod` controls, and runs an ablation leg on every CI run:
+with the mes parser swapped for the correct one, exactly the six buggy-value
+predictions must fail — proving the harness notices the bug's absence.
+(The chain-side consequence — the identical bit patterns in the riscv64
+chain's compiled `musl-boot0` `log10.o` and its flex failing — is internal
+evidence in the nix-bootstrapping project, branch `flex-tcc-rootcause`; this
+workflow demonstrates the mes defect and the arithmetic bridge from public
+sources only.)
+
 ## Pinned sources
 
 | Source | Pin |
@@ -568,6 +599,7 @@ go red on their own named failure rather than on a build error. Harness in
 | Gash-Utils | `gash-utils-0.2.0.tar.gz` from download.savannah.gnu.org, sha256 `e6aae5a6…59d4a3` |
 | r6rs-compression | git.ngyro.com/r6rs-compression @ `a2d01f24d5ad703ed2742b97053d19dcd42f89b1` (the commit bootar v1b pins) |
 | struct-pack / hashing | gitlab.com/weinholt @ `11b71963…239ee` / `eb280801…ef0cb` (likewise bootar's pins) |
+| musl | `musl-1.1.24.tar.gz` from musl.libc.org, sha256 `1370c9a8…022a3` |
 
 ---
 
