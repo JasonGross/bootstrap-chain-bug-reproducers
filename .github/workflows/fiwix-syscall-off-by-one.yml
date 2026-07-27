@@ -1,0 +1,19 @@
+name: fiwix-syscall-off-by-one
+# GREEN == the bug REPRODUCES: Fiwix do_syscall's `if(num > NR_SYSCALLS)` admits
+# num == NR_SYSCALLS, so syscall_table[NR_SYSCALLS] is fetched one past the
+# table (should be `>=`).  Real on stock i386; independent of the LP64
+# sizeof(unsigned int) count bug (reproducer 07).  The corrected `>=` control
+# rejects it.
+on:
+  push:
+  workflow_dispatch:
+jobs:
+  reproduce:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install 32-bit multilib
+        run: sudo apt-get update -q && sudo apt-get install -y -q gcc-multilib
+      - name: Reproduce (i386 + x86_64 off-by-one, ASan OOB, guard-not-a-bound; corrected-check control)
+        run: bash bugs/24-fiwix-syscall-off-by-one/run.sh
