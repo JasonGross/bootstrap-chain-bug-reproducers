@@ -16,7 +16,7 @@ reconstruction `(double)bn[1]*4294967296.0` truncates 2^32 to 0, and the
 decimal path returns garbage. Such a tcc then bakes zeroed constants into
 musl's scalbn.o/floatscan.o when it compiles musl, poisoning the very
 strtod a later tcc would link -- a circular dependency no tcc in the
-lineage can break (see data/mescc-bugs/bug17, docs/upstream-email-mes-fp.md).
+lineage can break.
 
 Rewrite the literal-to-bits step to construct the IEEE-754 encoding with
 integer arithmetic only -- no FP op, no 64-bit type, no multiply (x10 is
@@ -63,8 +63,8 @@ diff --git a/tccpp.c b/tccpp.c
 +   path.  Builds the IEEE bit pattern with integer arithmetic only
 +   (no FP op, no 64-bit type, no multiply), so FP literals parse
 +   correctly even when tcc itself was compiled by a compiler/libc
-+   without working floating point (MesCC + mes libc).  See
-+   data/mescc-bugs/bug17 and docs/upstream-email-mes-fp.md.
++   without working floating point (MesCC + mes libc) -- the exact
++   circular FP-poison condition a full-source bootstrap hits.
 +   ------------------------------------------------------------------ */
 +/* 224 * 32 = 7168 bits.  tcc's token_buf is STRING_MAX_SIZE (1024) chars, so a
 +   literal carries at most ~1024 significant decimal digits (~3402 bits); with

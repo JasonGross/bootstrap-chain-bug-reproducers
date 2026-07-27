@@ -37,7 +37,7 @@ if ./work/demo; then
   loud "\"1.625\" (10x), and 0.005 / 0.05 / 0.5 ALL as \"0.5\"."
   loud "Consequence in a bootstrap: any build-time GENERATOR that prints a"
   loud "float through the bootstrap libc writes wrong text into generated"
-  loud "source.  In the nix-bootstrapping arm ladder the same class of defect"
+  loud "source.  In the arm bootstrap ladder the same class of defect"
   loud "(there via the boot musl, not mes) made GMP's gen-psqr emit a 2.4 GB"
   loud "mpn/perfsqr.h whose header comment read \"0+00%\" instead of \"82.81%\"."
   loud "Note that is the OUTPUT half of the FP problem; bug 5's tcc literal"

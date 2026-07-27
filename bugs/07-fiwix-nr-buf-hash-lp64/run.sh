@@ -62,6 +62,6 @@ loud "ILP32: NR_BUF_HASH == slot count; no overflow (why i386 Fiwix never sees t
 banner "VERDICT"
 loud "BUG REPRODUCED: on LP64, Fiwix 1.5.0's NR_BUF_HASH indexes up to 2x the"
 loud "buffer_hash_table allocation.  Harmless on i386; a memory-corruption"
-loud "landmine for any 64-bit port (found during the nix-bootstrapping riscv64"
-loud "LP64 port of Fiwix)."
+loud "landmine for any 64-bit port (found during a riscv64 LP64 port of"
+loud "Fiwix)."
 echo "PASS: fiwix-nr-buf-hash-lp64 reproduced"

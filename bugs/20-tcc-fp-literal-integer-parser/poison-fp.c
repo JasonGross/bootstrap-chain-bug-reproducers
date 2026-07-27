@@ -4,7 +4,7 @@
  * own binary is linked against (tccpp.c: the hex path ends in ldexp, the
  * decimal path calls strtof/strtod/strtold).  In a bootstrap the libc is
  * DOWNSTREAM of the compiler, so a broken-FP libc poisons every FP constant the
- * compiler emits (nix-bootstrapping bug17; see bugs/05-tcc-fp-parse-libc-poison
+ * compiler emits (see bugs/05-tcc-fp-parse-libc-poison
  * for the mechanism).  GNU Mes' lib/stub/ldexp.c is literally `return 0;`, and
  * its strtod backend (abtod) is wrong.
  *

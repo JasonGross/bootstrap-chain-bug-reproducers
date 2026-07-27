@@ -5,7 +5,7 @@
 # constant is garbage lineage-wide; and MesCC, the compiler that builds the
 # first tcc, has no FP support at all.
 # GREEN == mes strtod (verbatim sources, host gcc) parses "0.9999" as EXACTLY
-# 999.9 -- the ceil() constant observed in the nix-bootstrapping riscv64
+# 999.9 -- the ceil() constant observed in the riscv64
 # fixpoint forensics -- conflating it bit-for-bit with "999.9", AND MesCC
 # demonstrably cannot materialize the IEEE constant at all; host strtod is
 # the correct-behavior control.
@@ -94,7 +94,7 @@ loud "BUG REPRODUCED (component level): in the mes-lineage riscv64 tcc, FP"
 loud "literals are parsed by mes strtod -> abtod, which turns \"0.9999\" into"
 loud "EXACTLY 999.9 (0x408F3F3333333333) -- bit-identical to its parse of"
 loud "\"999.9\" -- instead of 0x3FEFFF2E48E8A71E; and the MesCC stage upstream"
-loud "has no FP representation at all.  In the nix-bootstrapping riscv64"
+loud "has no FP representation at all.  In the riscv64"
 loud "fixpoint forensics this is visible in-chain: the ENTIRE binary delta"
 loud "between the MesCC-built tcc-mes and its self-rebuilt successor is the"
 loud "8-byte constant for mes libc ceil()'s literal 0.9999 (garbage bits vs"

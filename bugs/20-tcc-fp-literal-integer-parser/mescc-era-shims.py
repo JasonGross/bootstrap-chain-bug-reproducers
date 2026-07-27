@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Make the janneke tinycc fork's BOOTSTRAP+arm configuration compile under a
 real (gcc) host compiler.  BOTH edits are DISJOINT from the bug under test
-(init_putv's VT_LDOUBLE case in tccgen.c) and mirror what the nix-bootstrapping
-arm bootstrap driver itself does:
+(init_putv's VT_LDOUBLE case in tccgen.c) and mirror what the arm bootstrap
+driver itself does:
 
 1. arm-gen.c gfunc_prolog: under -DBOOTSTRAP, `avregs = AVAIL_REGS_INITIALIZER;`
    expands to `avregs = {0};`, which is not valid C (a brace list can
