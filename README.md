@@ -692,13 +692,15 @@ wrong: the armv7l `unshare` wrapper uses exactly this — `~0 JUMP_ALWAYS` at
 `armv7l/linux/unistd.c:201`, i.e. `b .+8`, jumping over an embedded
 syscall-number word — which must assemble to a 4-byte ARM branch (the 24-bit
 `000000` plus the `EA` condition byte) but comes out as the 2-byte `00 EA` under
-M0. The **label-relative** form `^~label` (e.g. `^~divide_loop JUMP_NE`) carries
-a leading `^`: the assembler does not numerate it, it copies the token through
+M0. The other form is a `~` whose operand is a **label**, not a number — written
+`^~label` in armv7l's M2libc (e.g. `^~divide_loop JUMP_NE`). A label operand is
+never numerated by the assembler: M0 and M1 alike copy the token through
 unresolved to the hex2 **linker**, which sizes `~` at 3 bytes (`hex2_linker.c`:
-`ip = ip + 3` and `outputPointer(displacement, 3, FALSE)`). So M2libc's 13
-armv7l `^~label` branch/call targets assemble byte-identically whether the
-assembler was M0 or M1 — the M0 gap never reaches them. The single literal `~0`
-site is the whole impact.
+`ip = ip + 3` and `outputPointer(displacement, 3, FALSE)`); the leading `^` is a
+hex2 alignment marker, not a signal to the assembler. So M2libc's 13 armv7l
+`^~label` branch/call targets assemble byte-identically whether the assembler was
+M0 or M1 — the M0 gap never reaches them. The single literal `~0` site is the
+whole impact.
 
 The workflow builds the two upstream M0 binaries from pinned `stage0-posix-x86`
 and `stage0-posix-aarch64` sources (linked by a gcc-built `hex2`) and feeds them

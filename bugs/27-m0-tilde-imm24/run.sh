@@ -17,13 +17,15 @@
 #     uses exactly this at `armv7l/linux/unistd.c:201`: `~0 JUMP_ALWAYS`
 #     (`b .+8`, jumping over an embedded syscall-number word).  This single site
 #     is the whole impact of the bug.
-#   * LABEL-relative reference `^~label` (e.g. `^~divide_loop JUMP_NE`) -- the
-#     leading `^` marks it a reference the assembler does NOT numerate; it is
-#     copied through unresolved to the hex2 LINKER, which sizes `~` at 3 bytes
-#     (hex2_linker.c: `ip = ip + 3` and `outputPointer(displacement, 3, FALSE)`).
-#     So it assembles byte-identically whether the assembler was M0 or M1 -- the
-#     M0 gap never reaches it.  M2libc's 13 armv7l `^~label` branch/call targets
-#     are therefore UNAFFECTED; only the one literal `~0` site is mis-assembled.
+#   * LABEL operand (a `~` before a label, not a number) -- NOT numerated by the
+#     assembler at all: M0 and M1 alike copy the token through unresolved to the
+#     hex2 LINKER, which sizes `~` at 3 bytes (hex2_linker.c: `ip = ip + 3` and
+#     `outputPointer(displacement, 3, FALSE)`).  armv7l's M2libc writes these as
+#     `^~label` (e.g. `^~divide_loop JUMP_NE`); the leading `^` is a hex2
+#     alignment marker, not a signal to the assembler.  So the label form
+#     assembles byte-identically whether the assembler was M0 or M1 -- M2libc's
+#     13 armv7l `^~label` branch/call targets are UNAFFECTED; only the one
+#     literal `~0` site is mis-assembled.
 #
 # GREEN == the bug REPRODUCES (by EXECUTION, not inspection):
 #   A  PREMISE (live mescc-tools HEAD): M1 still numerates `~` as 24 bits
@@ -152,8 +154,10 @@ loud "M1: '~0' -> 000000 (24-bit) -- with the EA byte this is the ARM 'b .+8' th
 # ---------------------------------------------------------------------------
 banner "PART E -- BOUNDARY: the label form ^~label is hex2-LINKER-resolved, so UNAFFECTED"
 # ---------------------------------------------------------------------------
-# `^~label` carries a leading `^`: the assembler (M0 or M1) does not numerate it,
-# it copies the token through to the hex2 linker, which sizes `~` at 3 bytes.  So
+# `^~label`'s operand is a label, not a number, so the assembler (M0 or M1) does
+# not numerate it -- it copies the token through to the hex2 linker, which sizes
+# `~` at 3 bytes (the leading `^` is a hex2 alignment marker, not an assembler
+# signal).  So
 # it must assemble byte-identically through M0->hex2 and through M1->hex2.  This
 # is the control that BOUNDS the bug to the literal `~0` site (PART B-D): the 13
 # armv7l `^~label` branch/call targets are NOT mis-assembled.  label.M1 defines a
