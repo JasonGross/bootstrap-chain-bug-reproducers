@@ -46,7 +46,7 @@
 #      one literal `~0` site, not "every armv7l `~` site".
 #   F  BYTE-ORDER PROBE (synthetic value, NOT an M2libc site): every real `~`
 #      LITERAL in M2libc is `~0`, which is `000000` under any byte order and so
-#      cannot test the ORDER the fix specifies ("low 24 bits, little-endian").
+#      cannot test the byte ORDER the fix must match -- M1's, shown little-endian.
 #      A synthetic `~0x123456` makes M1 emit the low 24 bits low-byte-first as
 #      `56 34 12` -- little-endian, which would be `123456` if big-endian --
 #      while M0 truncates to the low byte `56`.  Testing a property the real
@@ -206,15 +206,16 @@ cmp -s <(head -c3 work/lblJ_m1.bin) <(head -c3 work/lblC_m1.bin) \
 loud "both label mnemonics share the ~ displacement fe ff ff, differ only in opcode (1a vs eb) -- hex2 sizes ~ on the character, not the opcode"
 
 # ---------------------------------------------------------------------------
-banner "PART F -- BYTE-ORDER PROBE: a NONZERO ~ literal pins the order the fix specifies"
+banner "PART F -- BYTE-ORDER PROBE: a NONZERO ~ literal pins M1's order, which the fix must match"
 # ---------------------------------------------------------------------------
 # SYNTHETIC PROBE, NOT AN M2libc SITE.  Every real `~` LITERAL in M2libc is the
 # single `~0` (the unshare site exercised in PART B-D), and `~0` is `000000`
 # under any byte order -- so the real corpus is structurally unable to test the
-# byte ORDER the recommended fix specifies ("emit the low 24 bits, little-
-# endian").  `~0x123456` does NOT occur in M2libc and is not part of the 16-site
-# census; it exists only to make that order observable by execution.  Probing a
-# property the corpus cannot reach is the point, not a weakness.
+# byte ORDER the fix must match: M1's own, which the run shows to be little-
+# endian (the fix has to AGREE with M1, not mandate an order of its own).
+# `~0x123456` does NOT occur in M2libc and is not part of the 16-site census; it
+# exists only to make that order observable by execution.  Probing a property
+# the corpus cannot reach is the point, not a weakness.
 #
 # 0x123456 has three distinct bytes.  M1 (the correct 24-bit emitter) renders it
 # low-byte-first as `56 34 12` -- which IS little-endian, and would be `12 34 56`
@@ -232,8 +233,8 @@ loud "M0-x86 output for '~0x123456 JUMP_ALWAYS':";  cat work/probe_x86.hex2 | se
 grep -q '563412' work/probe_m1.hex2 \
   || die "M1 did not emit 0x123456 as little-endian '563412' -- got: $(tr '\n' ' ' < work/probe_m1.hex2)"
 grep -q '123456' work/probe_m1.hex2 \
-  && die "M1 emitted big-endian '123456' -- the fix's 'little-endian' would be FALSE; re-read"
-loud "M1: 0x123456 -> 56 34 12 (low-byte-first) then EA -- little-endian pinned by execution, not asserted"
+  && die "M1 emitted big-endian '123456' -- the demonstrated little-endian order is wrong; re-read"
+loud "M1: 0x123456 -> 56 34 12 (low-byte-first) then EA -- little-endian pinned by execution and enforced by the big-endian die-guard above, not merely asserted"
 # M0 (both lineages): 8-bit, only the low byte 56, byte-identical shared defect.
 grep -qx '56' work/probe_x86.hex2 \
   || die "M0-x86 did not render '~0x123456' as the 8-bit low byte '56'"
@@ -253,5 +254,5 @@ loud "^~label is hex2-linker-resolved and assembles identically under M0 and M1,
 loud "so the impact is the one literal site, not the 13 label-relative ones."
 loud "A synthetic byte-order probe (~0x123456, NOT an M2libc site) shows M1 emit"
 loud "the low 24 bits little-endian as 56 34 12; M0 keeps only the low byte 56 --"
-loud "pinning the byte order the fix recommends, which ~0 alone cannot test."
+loud "pinning the byte order M1 uses, the one the fix must match, which ~0 alone cannot test."
 echo "PASS: m0-tilde-imm24 reproduced (literal ~0: x86 M0 == aarch64 M0 == 8-bit; M1 == 24-bit; both label mnemonics ^~loop JUMP_NE and ^~loop CALL_ALWAYS identical via hex2; byte-order probe ~0x123456: M1 little-endian 56 34 12, M0 low byte 56)"
