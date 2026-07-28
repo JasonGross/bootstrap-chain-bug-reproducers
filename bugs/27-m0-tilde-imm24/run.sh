@@ -3,33 +3,45 @@
 #
 # The mescc-tools M1 assembler numerates immediate operands by a one-character
 # width prefix: `!` = 8-bit, `@`/`%` wider, and `~` = 24-bit (M1-macro.c:
-# `else if('~' == c) number_of_bytes = 3;` / `value & 0xFFFFFF`).  The armv7l
-# M2libc uses `~` for the 24-bit relative offset of an ARM `B{cond}`/`BL`, both
-# as a label-relative target (`^~divide_loop JUMP_NE`) and as a literal-offset
-# jump over an embedded word: `~0 JUMP_ALWAYS` at `armv7l/linux/unistd.c:201`
-# (the `unshare` wrapper), which must assemble to a 4-byte ARM `b .+8` (`000000`
-# + the `EA` condition byte).  This reproducer feeds the assemblers that exact
-# verbatim armv7l line -- not a synthetic spelling.  M0 -- the minimal
-# per-architecture assembler used earlier in the stage0 ladder, shipped as
-# `M0_<arch>.hex2` with readable `GAS/M0_<arch>.S` and `Development/M0_<arch>.M1`
-# mirrors -- has no `~` case: its numerate routine special-cases only `%` and
-# `@` and falls through to an 8-bit store for everything else, so it numerates
-# `~` at only 8 bits.  So `~0` comes out as `00`, two bytes short of `000000`;
-# every armv7l `~`-immediate site is two bytes short, misaligning every
-# following label.
+# `else if('~' == c) number_of_bytes = 3;` / `value & 0xFFFFFF`).  M0 -- the
+# minimal per-architecture assembler used earlier in the stage0 ladder, shipped
+# as `M0_<arch>.hex2` with readable `GAS/M0_<arch>.S` and
+# `Development/M0_<arch>.M1` mirrors -- has no `~` case: its numerate routine
+# special-cases only `%` and `@` and falls through to an 8-bit store for
+# everything else, so it numerates a `~` LITERAL at only 8 bits.  `~0` comes out
+# as `00`, two bytes short of the 24-bit `000000`.
+#
+# `~` has TWO operand forms, and only ONE of them reaches M0's numerate routine:
+#   * LITERAL number `~0` -- resolved by the ASSEMBLER (M0/M1).  M0 gets it
+#     wrong (8 bits); M1 gets it right (24 bits).  The armv7l `unshare` wrapper
+#     uses exactly this at `armv7l/linux/unistd.c:201`: `~0 JUMP_ALWAYS`
+#     (`b .+8`, jumping over an embedded syscall-number word).  This single site
+#     is the whole impact of the bug.
+#   * LABEL-relative reference `^~label` (e.g. `^~divide_loop JUMP_NE`) -- the
+#     leading `^` marks it a reference the assembler does NOT numerate; it is
+#     copied through unresolved to the hex2 LINKER, which sizes `~` at 3 bytes
+#     (hex2_linker.c: `ip = ip + 3` and `outputPointer(displacement, 3, FALSE)`).
+#     So it assembles byte-identically whether the assembler was M0 or M1 -- the
+#     M0 gap never reaches it.  M2libc's 13 armv7l `^~label` branch/call targets
+#     are therefore UNAFFECTED; only the one literal `~0` site is mis-assembled.
 #
 # GREEN == the bug REPRODUCES (by EXECUTION, not inspection):
 #   A  PREMISE (live mescc-tools HEAD): M1 still numerates `~` as 24 bits
 #      (3 bytes, `& 0xFFFFFF`) -- the correct width the armv7l idiom needs.
 #   B  x86 M0 (built from pinned stage0-posix-x86, run under qemu-i386) renders
-#      `~0` as the 8-bit `00`, NOT `000000`.
+#      the LITERAL `~0` as the 8-bit `00`, NOT `000000`.
 #   C  aarch64 M0 (built from pinned stage0-posix-aarch64, run under
 #      qemu-aarch64) renders `~0` the SAME wrong way -- its output is
 #      byte-identical to x86 M0's.  Two independent per-arch M0 lineages agree
-#      on the wrong answer; that shared defect is why a three-way identity
-#      check across lineages passes while every lineage is broken.
+#      on the wrong answer; that shared defect is why a cross-lineage identity
+#      check between them cannot catch it.
 #   D  M1 (the referee, gcc-built) renders the same `~0` as the correct 24-bit
 #      `000000`.
+#   E  BOUNDARY / control: the LABEL form `^~loop JUMP_NE`, taken through the
+#      full M0->hex2 and M1->hex2 pipelines, assembles byte-identically (a
+#      4-byte ARM branch, `fe ff ff 1a`).  hex2 sizes `~` correctly, so the M0
+#      gap does not reach the 13 `^~label` sites -- the bug is confined to the
+#      one literal `~0` site, not "every armv7l `~` site".
 cd "$(dirname "$0")"
 . ../common.sh
 BUGDIR=$PWD
@@ -104,13 +116,14 @@ file work/M0-x86     | grep -q '80386'        || die "M0-x86 is not an i386 ELF"
 file work/M0-aarch64 | grep -q 'aarch64'      || die "M0-aarch64 is not an aarch64 ELF"
 loud "linked M0-x86 (i386) and M0-aarch64 from pinned stage0-posix sources"
 
-# assemble tilde.M1 with an M0 and echo the emitted hex2 text.
-run_m0 () { rm -f "$2"; ( cd "$BUGDIR/work" && $1 ../tilde.M1 "$(basename "$2")" ) || die "M0 crashed"; }
+# assemble an .M1 file with an M0 and echo the emitted hex2 text.
+# run_m0 <m0-invocation> <out-hex2> <input.M1>
+run_m0 () { rm -f "$2"; ( cd "$BUGDIR/work" && $1 "../$3" "$(basename "$2")" ) || die "M0 crashed"; }
 
 # ---------------------------------------------------------------------------
-banner "PART B -- x86 M0 renders ~0 as the 8-bit 00 (not 000000)"
+banner "PART B -- x86 M0 renders the LITERAL ~0 as the 8-bit 00 (not 000000)"
 # ---------------------------------------------------------------------------
-run_m0 "qemu-i386-static ./M0-x86" work/x86.hex2
+run_m0 "qemu-i386-static ./M0-x86" work/x86.hex2 tilde.M1
 loud "x86 M0 output for '~0 JUMP_ALWAYS':"; cat work/x86.hex2 | sed 's/^/    /'
 grep -q 'EA' work/x86.hex2       || die "x86 M0 did not emit JUMP_ALWAYS (EA) -- it did not run the input"
 grep -q '000000' work/x86.hex2   && die "x86 M0 emitted a 24-bit '000000' -- the gap is CLOSED; re-read"
@@ -120,7 +133,7 @@ loud "x86 M0: '~0' -> 00 (8-bit), two bytes short of 000000"
 # ---------------------------------------------------------------------------
 banner "PART C -- aarch64 M0 renders it the SAME wrong way (shared defect)"
 # ---------------------------------------------------------------------------
-run_m0 "qemu-aarch64-static ./M0-aarch64" work/aarch64.hex2
+run_m0 "qemu-aarch64-static ./M0-aarch64" work/aarch64.hex2 tilde.M1
 loud "aarch64 M0 output for '~0 JUMP_ALWAYS':"; cat work/aarch64.hex2 | sed 's/^/    /'
 grep -q '000000' work/aarch64.hex2 && die "aarch64 M0 emitted a 24-bit '000000' -- the gap is CLOSED; re-read"
 grep -qx '00' work/aarch64.hex2    || die "aarch64 M0 did not render '~0' as the 8-bit '00'"
@@ -136,10 +149,40 @@ loud "M1 output for '~0 JUMP_ALWAYS':"; cat work/m1.hex2 | sed 's/^/    /'
 grep -q '000000' work/m1.hex2 || die "M1 did not render '~0' as 24-bit '000000' -- referee unexpectedly agrees with M0"
 loud "M1: '~0' -> 000000 (24-bit) -- with the EA byte this is the ARM 'b .+8' the armv7l idiom needs"
 
+# ---------------------------------------------------------------------------
+banner "PART E -- BOUNDARY: the label form ^~label is hex2-LINKER-resolved, so UNAFFECTED"
+# ---------------------------------------------------------------------------
+# `^~label` carries a leading `^`: the assembler (M0 or M1) does not numerate it,
+# it copies the token through to the hex2 linker, which sizes `~` at 3 bytes.  So
+# it must assemble byte-identically through M0->hex2 and through M1->hex2.  This
+# is the control that BOUNDS the bug to the literal `~0` site (PART B-D): the 13
+# armv7l `^~label` branch/call targets are NOT mis-assembled.  label.M1 defines a
+# label and branches back to it with `^~loop JUMP_NE`; the correct armv7l
+# encoding is the 4-byte branch fe ff ff 1a (24-bit displacement -2 + the 1A
+# condition byte).
+run_m0 "qemu-i386-static ./M0-x86"        work/lbl_x86.hex2 label.M1
+run_m0 "qemu-aarch64-static ./M0-aarch64" work/lbl_a64.hex2 label.M1
+"$M1B" --architecture armv7l --little-endian -f label.M1 -o work/lbl_m1.hex2 >/dev/null 2>&1 || die "M1 crashed on label.M1"
+# link each hex2 text to a final armv7l binary -- this is where `~` gets sized.
+for p in lbl_x86 lbl_a64 lbl_m1; do
+  "$HEX2" --architecture armv7l --little-endian --base-address 0x0 -f "work/$p.hex2" -o "work/$p.bin" >/dev/null 2>&1 \
+    || die "hex2 link failed for $p"
+done
+loud "M0-x86     -> hex2 : $(od -An -tx1 work/lbl_x86.bin | tr -s ' ')"
+loud "M0-aarch64 -> hex2 : $(od -An -tx1 work/lbl_a64.bin | tr -s ' ')"
+loud "M1         -> hex2 : $(od -An -tx1 work/lbl_m1.bin  | tr -s ' ')"
+sz=$(wc -c < work/lbl_m1.bin)
+[ "$sz" -eq 4 ] || die "label form is not a 4-byte ARM branch (got $sz bytes) -- re-read"
+cmp -s work/lbl_x86.bin work/lbl_m1.bin || die "M0-x86 and M1 disagree on the label form -- expected byte-identical (linker-sized)"
+cmp -s work/lbl_a64.bin work/lbl_m1.bin || die "M0-aarch64 and M1 disagree on the label form -- expected byte-identical (linker-sized)"
+loud "label form ^~loop JUMP_NE: M0-x86 == M0-aarch64 == M1, a 4-byte branch -- hex2 sizes ~, the M0 gap does not reach it"
+
 banner "VERDICT"
-loud "BUG REPRODUCED: stage0's M0 numerates the '~' immediate at 8 bits, so the"
-loud "armv7l '~0 JUMP_ALWAYS' probe assembles two bytes short (00 vs 000000)."
-loud "Both the x86 and aarch64 upstream M0 lineages emit the identical 8-bit"
-loud "answer, while M1 -- the assembler used later in the same chain -- emits the"
-loud "correct 24-bit form.  The two assemblers disagree on the width of '~'."
-echo "PASS: m0-tilde-imm24 reproduced (x86 M0 == aarch64 M0 == 8-bit; M1 == 24-bit)"
+loud "BUG REPRODUCED: stage0's M0 numerates the LITERAL '~' immediate at 8 bits,"
+loud "so the armv7l '~0 JUMP_ALWAYS' site (armv7l/linux/unistd.c:201) assembles"
+loud "two bytes short (00 vs 000000).  Both the x86 and aarch64 upstream M0"
+loud "lineages emit the identical 8-bit answer, while M1 -- the assembler used"
+loud "later in the same chain -- emits the correct 24-bit form.  The label form"
+loud "^~label is hex2-linker-resolved and assembles identically under M0 and M1,"
+loud "so the impact is the one literal site, not the 13 label-relative ones."
+echo "PASS: m0-tilde-imm24 reproduced (literal ~0: x86 M0 == aarch64 M0 == 8-bit; M1 == 24-bit; label ^~ form identical via hex2)"

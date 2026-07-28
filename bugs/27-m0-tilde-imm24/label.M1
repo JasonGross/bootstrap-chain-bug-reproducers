@@ -1,0 +1,3 @@
+DEFINE JUMP_NE 1A
+:loop
+^~loop JUMP_NE
