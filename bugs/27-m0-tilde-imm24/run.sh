@@ -44,6 +44,13 @@
 #      4-byte ARM branch, `fe ff ff 1a`).  hex2 sizes `~` correctly, so the M0
 #      gap does not reach the 13 `^~label` sites -- the bug is confined to the
 #      one literal `~0` site, not "every armv7l `~` site".
+#   F  BYTE-ORDER PROBE (synthetic value, NOT an M2libc site): every real `~`
+#      LITERAL in M2libc is `~0`, which is `000000` under any byte order and so
+#      cannot test the ORDER the fix specifies ("low 24 bits, little-endian").
+#      A synthetic `~0x123456` makes M1 emit the low 24 bits low-byte-first as
+#      `56 34 12` -- little-endian, which would be `123456` if big-endian --
+#      while M0 truncates to the low byte `56`.  Testing a property the real
+#      corpus is structurally unable to reach is the point, not a weakness.
 cd "$(dirname "$0")"
 . ../common.sh
 BUGDIR=$PWD
@@ -198,6 +205,44 @@ cmp -s <(head -c3 work/lblJ_m1.bin) <(head -c3 work/lblC_m1.bin) \
   || die "JUMP_NE and CALL_ALWAYS label forms differ in the ~ displacement -- expected identical fe ff ff"
 loud "both label mnemonics share the ~ displacement fe ff ff, differ only in opcode (1a vs eb) -- hex2 sizes ~ on the character, not the opcode"
 
+# ---------------------------------------------------------------------------
+banner "PART F -- BYTE-ORDER PROBE: a NONZERO ~ literal pins the order the fix specifies"
+# ---------------------------------------------------------------------------
+# SYNTHETIC PROBE, NOT AN M2libc SITE.  Every real `~` LITERAL in M2libc is the
+# single `~0` (the unshare site exercised in PART B-D), and `~0` is `000000`
+# under any byte order -- so the real corpus is structurally unable to test the
+# byte ORDER the recommended fix specifies ("emit the low 24 bits, little-
+# endian").  `~0x123456` does NOT occur in M2libc and is not part of the 16-site
+# census; it exists only to make that order observable by execution.  Probing a
+# property the corpus cannot reach is the point, not a weakness.
+#
+# 0x123456 has three distinct bytes.  M1 (the correct 24-bit emitter) renders it
+# low-byte-first as `56 34 12` -- which IS little-endian, and would be `12 34 56`
+# (`123456`) if it were big-endian.  M0, numerating at 8 bits, keeps only the low
+# byte `56` and drops the now-visible `34 12` (on `~0` those dropped bytes were
+# zero, so the loss was invisible -- which is exactly why `~0` cannot pin order).
+run_m0 "qemu-i386-static ./M0-x86"        work/probe_x86.hex2 tilde_nonzero.M1
+run_m0 "qemu-aarch64-static ./M0-aarch64" work/probe_a64.hex2 tilde_nonzero.M1
+"$M1B" --architecture armv7l --little-endian -f tilde_nonzero.M1 -o work/probe_m1.hex2 >/dev/null 2>&1 \
+  || die "M1 crashed on tilde_nonzero.M1"
+loud "M1 output for '~0x123456 JUMP_ALWAYS':";     cat work/probe_m1.hex2 | sed 's/^/    /'
+loud "M0-x86 output for '~0x123456 JUMP_ALWAYS':";  cat work/probe_x86.hex2 | sed 's/^/    /'
+# M1: little-endian low-24 -> 563412 (NOT big-endian 123456), then EA.  The
+# big-endian guard is the one that makes "little-endian" a claim that can FAIL.
+grep -q '563412' work/probe_m1.hex2 \
+  || die "M1 did not emit 0x123456 as little-endian '563412' -- got: $(tr '\n' ' ' < work/probe_m1.hex2)"
+grep -q '123456' work/probe_m1.hex2 \
+  && die "M1 emitted big-endian '123456' -- the fix's 'little-endian' would be FALSE; re-read"
+loud "M1: 0x123456 -> 56 34 12 (low-byte-first) then EA -- little-endian pinned by execution, not asserted"
+# M0 (both lineages): 8-bit, only the low byte 56, byte-identical shared defect.
+grep -qx '56' work/probe_x86.hex2 \
+  || die "M0-x86 did not render '~0x123456' as the 8-bit low byte '56'"
+grep -q '3412' work/probe_x86.hex2 \
+  && die "M0-x86 kept the high bytes -- the 24-bit gap is CLOSED; re-read"
+cmp -s work/probe_x86.hex2 work/probe_a64.hex2 \
+  || die "x86 and aarch64 M0 differ on the nonzero probe -- expected identical shared defect"
+loud "M0 (x86==aarch64): 0x123456 -> 56 only, dropping the nonzero 34 12 -- same 8-bit truncation as ~0, now visible"
+
 banner "VERDICT"
 loud "BUG REPRODUCED: stage0's M0 numerates the LITERAL '~' immediate at 8 bits,"
 loud "so the armv7l '~0 JUMP_ALWAYS' site (armv7l/linux/unistd.c:201) assembles"
@@ -206,4 +251,7 @@ loud "lineages emit the identical 8-bit answer, while M1 -- the assembler used"
 loud "later in the same chain -- emits the correct 24-bit form.  The label form"
 loud "^~label is hex2-linker-resolved and assembles identically under M0 and M1,"
 loud "so the impact is the one literal site, not the 13 label-relative ones."
-echo "PASS: m0-tilde-imm24 reproduced (literal ~0: x86 M0 == aarch64 M0 == 8-bit; M1 == 24-bit; both label mnemonics ^~loop JUMP_NE and ^~loop CALL_ALWAYS identical via hex2)"
+loud "A synthetic byte-order probe (~0x123456, NOT an M2libc site) shows M1 emit"
+loud "the low 24 bits little-endian as 56 34 12; M0 keeps only the low byte 56 --"
+loud "pinning the byte order the fix recommends, which ~0 alone cannot test."
+echo "PASS: m0-tilde-imm24 reproduced (literal ~0: x86 M0 == aarch64 M0 == 8-bit; M1 == 24-bit; both label mnemonics ^~loop JUMP_NE and ^~loop CALL_ALWAYS identical via hex2; byte-order probe ~0x123456: M1 little-endian 56 34 12, M0 low byte 56)"
