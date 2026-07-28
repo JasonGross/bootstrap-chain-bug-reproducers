@@ -67,7 +67,12 @@ if curl -fsSL --max-time 60 --retry 2 -o work/unistd-live.c "$M2LIBC_RAW" 2>/dev
       || die "sibling $sib() lost its 'LOAD32 R0 MEMORY' -- the contrast changed; re-read"
     loud "sibling $sib(): carries 'LOAD32 R0 MEMORY' (correctly dereferences)"
   done
-  loud "PREMISE CONFIRMED at HEAD: unlink is the sole char* wrapper here missing the deref"
+  loud "PREMISE CONFIRMED at HEAD: unlink() has SUB R12 + syscall !10 but no 'LOAD32 R0 MEMORY'; access/chdir/symlink all carry it"
+  # NOTE: this leg checks unlink() against access/chdir/symlink only, so it
+  # cannot and does NOT establish that unlink is the sole affected wrapper.
+  # It is not: chroot() (char*) and close() (int fd) in this same file share
+  # the identical missing 'LOAD32 R0 MEMORY' (verified by reading the asm).
+  # Do not read the line above as a uniqueness claim.
 else
   loud "PREMISE RE-CHECK SKIPPED: could not reach $M2LIBC_RAW"
   loud "  (host unreachable != bug fixed -- not failing the run over it)"
