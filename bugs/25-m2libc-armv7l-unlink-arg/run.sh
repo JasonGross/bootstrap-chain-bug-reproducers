@@ -11,8 +11,11 @@
 #     chroot(char const* path) syscall !61   -> kernel gets &path
 #     close(int fd)            syscall !6     -> kernel gets &fd
 # Their arg-taking siblings access()/chdir()/symlink() all carry the LOAD32,
-# and every other architecture (x86/amd64/riscv32/riscv64 dereference; aarch64
-# needs no load) is correct -- this is armv7l-only.
+# and on every other architecture (x86, amd64, riscv32, riscv64, aarch64) all
+# three wrappers fetch the argument value correctly -- this is armv7l-only.
+# (The load mechanism differs per arch -- e.g. aarch64 does a register move for
+# unlink but "sub_x0,x0,8 ; ldr_x0,[x0]" for close/chroot -- but all fetch the
+# value.)
 #
 # GREEN == the bug REPRODUCES:
 #   A  PREMISE (live M2libc HEAD, re-checked every run so a fix goes red):
