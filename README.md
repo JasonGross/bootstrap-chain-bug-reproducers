@@ -722,6 +722,19 @@ only in the opcode byte, so hex2 sizes `~` on the character alone). This
 positively demonstrates that the 13 `^~label` sites are unaffected and the bug is
 confined to the one literal site.
 
+**PART F** probes the *fix*, not the bug. A patched M0 must store the low 24
+bits of a `~` literal in the same byte order M1 uses, so the two assemblers
+agree; but every real `~` literal in M2libc is `~0`, which is `000000` under any
+byte order and so cannot exercise order at all. A synthetic `~0x123456` — not an
+M2libc site and not part of the 16-`~` census, present only to make order
+observable — has M1 emit the low 24 bits low-byte-first as `56 34 12` while an M0
+keeps only the low byte `56`. So the order the fix must match is M1's,
+demonstrated by execution to be little-endian rather than asserted. Both
+assertions are ablated for non-vacuity: a fabricated big-endian M1 output
+`12 34 56` trips the byte-order check, and a fabricated M0 output that keeps the
+high bytes `34 12` trips the truncation check — neither guard can pass without
+the property it names.
+
 ## Pinned sources
 
 | Source | Pin |
