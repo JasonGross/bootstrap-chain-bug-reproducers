@@ -1,7 +1,8 @@
 name: m0-tilde-imm24
 # GREEN == the bug REPRODUCES: stage0's M0 macro assembler numerates the `~`
-# immediate at 8 bits, so the armv7l `~0 JUMP_ALWAYS` idiom assembles two bytes
-# short (00 instead of the 24-bit 000000 the ARM `b .+8` needs).  Both the x86
+# immediate at 8 bits, so a `~0 JUMP_ALWAYS` probe of armv7l's 24-bit `~` branch
+# immediate assembles two bytes short (00 instead of the 24-bit 000000 the ARM
+# `b .+8` needs).  Both the x86
 # and aarch64 upstream M0 binaries (built from pinned stage0-posix sources and
 # run under qemu-user) emit the identical 8-bit answer, while M1 -- the
 # assembler used later in the same chain -- emits the correct 24-bit form.
