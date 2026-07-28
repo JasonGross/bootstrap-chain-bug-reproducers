@@ -1,11 +1,14 @@
 name: m2libc-armv7l-unlink-arg
-# GREEN == the bug REPRODUCES: M2libc's armv7l unlink() passes the kernel
-# &filename instead of filename (its wrapper is missing the
-# "!0 R0 LOAD32 R0 MEMORY" dereference its char* siblings carry).  A real C
-# program built through the M2-Planet -> M1 -> hex2 chain against pinned M2libc
-# cannot delete a file under qemu-arm while access() on the same path finds it;
-# the identical amd64 build deletes it; adding the one missing line fixes armv7l.
-# PART A re-reads live M2libc HEAD so a silent upstream fix goes red.
+# GREEN == the bug REPRODUCES: three M2libc armv7l syscall wrappers pass the
+# kernel &arg instead of arg (each is missing the "!0 R0 LOAD32 R0 MEMORY"
+# dereference their siblings carry) -- unlink(char*), chroot(char*), and
+# close(int fd).  Real C programs built through the M2-Planet -> M1 -> hex2
+# chain against pinned M2libc show it at runtime under qemu-arm: unlink()
+# cannot delete a file access() finds; a read() after close() still succeeds;
+# and -strace shows chroot() handed a bogus pointer where access() gets the
+# path.  The identical amd64 builds behave; adding the one missing line to
+# each of the three wrappers fixes armv7l.  PART A re-reads live M2libc HEAD
+# so a silent upstream fix goes red.
 on:
   push:
   workflow_dispatch:
@@ -19,5 +22,5 @@ jobs:
         run: |
           sudo apt-get update -q
           sudo apt-get install -y -q gcc git qemu-user-static
-      - name: Reproduce (armv7l unlink fails + file survives; amd64 removes; 1-line fix works)
+      - name: Reproduce (armv7l unlink/close/chroot pass &arg; amd64 controls clean; 3-line fix works)
         run: bash bugs/25-m2libc-armv7l-unlink-arg/run.sh
