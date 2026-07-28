@@ -136,7 +136,7 @@ loud "M1: '~0' -> 000000 (24-bit) -- with the EA byte this is the ARM 'b .+8' th
 
 banner "VERDICT"
 loud "BUG REPRODUCED: stage0's M0 numerates the '~' immediate at 8 bits, so the"
-loud "armv7l '~0 JUMP_ALWAYS' idiom assembles two bytes short (00 vs 000000)."
+loud "armv7l '~0 JUMP_ALWAYS' probe assembles two bytes short (00 vs 000000)."
 loud "Both the x86 and aarch64 upstream M0 lineages emit the identical 8-bit"
 loud "answer, while M1 -- the assembler used later in the same chain -- emits the"
 loud "correct 24-bit form.  The two assemblers disagree on the width of '~'."
