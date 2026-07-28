@@ -679,9 +679,11 @@ takes no position on whether any of this should be adopted upstream. Harness in
 The mescc-tools M1 assembler numerates an immediate operand by a one-character
 width prefix — `!` is 8-bit, `~` is 24-bit (`M1-macro.c`:
 `else if('~' == c) number_of_bytes = 3;` and `value & 0xFFFFFF`). The armv7l
-M2libc uses `~` for the 24-bit relative offset of an ARM `B{cond}`/`BL`, written
-`^~label` (e.g. `^~divide_loop JUMP_NE`); this reproducer probes that same width
-with a minimal `~0 JUMP_ALWAYS`, which must assemble to a 4-byte ARM `b .+8` —
+M2libc uses `~` for the 24-bit relative offset of an ARM `B{cond}`/`BL`, both as
+a label-relative target (`^~divide_loop JUMP_NE`) and as a literal-offset jump
+over an embedded word — `~0 JUMP_ALWAYS` at `armv7l/linux/unistd.c:201`, the
+`unshare` wrapper. This reproducer feeds the assemblers that verbatim armv7l
+line (not a synthetic spelling), which must assemble to a 4-byte ARM `b .+8` —
 the 24-bit `000000` plus the `EA` condition byte. But **M0**, the minimal
 per-architecture assembler used earlier in the same stage0 ladder (shipped as
 `M0_<arch>.hex2` with readable `GAS/M0_<arch>.S` and `Development/M0_<arch>.M1`

@@ -4,10 +4,12 @@
 # The mescc-tools M1 assembler numerates immediate operands by a one-character
 # width prefix: `!` = 8-bit, `@`/`%` wider, and `~` = 24-bit (M1-macro.c:
 # `else if('~' == c) number_of_bytes = 3;` / `value & 0xFFFFFF`).  The armv7l
-# M2libc uses `~` for the 24-bit relative offset of an ARM `B{cond}`/`BL`,
-# written `^~label` (e.g. `^~divide_loop JUMP_NE`).  This reproducer probes that
-# same width with a minimal one-line `~0 JUMP_ALWAYS`, which must assemble to a
-# 4-byte ARM `b .+8` (`000000` + the `EA` condition byte).  M0 -- the minimal
+# M2libc uses `~` for the 24-bit relative offset of an ARM `B{cond}`/`BL`, both
+# as a label-relative target (`^~divide_loop JUMP_NE`) and as a literal-offset
+# jump over an embedded word: `~0 JUMP_ALWAYS` at `armv7l/linux/unistd.c:201`
+# (the `unshare` wrapper), which must assemble to a 4-byte ARM `b .+8` (`000000`
+# + the `EA` condition byte).  This reproducer feeds the assemblers that exact
+# verbatim armv7l line -- not a synthetic spelling.  M0 -- the minimal
 # per-architecture assembler used earlier in the stage0 ladder, shipped as
 # `M0_<arch>.hex2` with readable `GAS/M0_<arch>.S` and `Development/M0_<arch>.M1`
 # mirrors -- has no `~` case: its numerate routine special-cases only `%` and
