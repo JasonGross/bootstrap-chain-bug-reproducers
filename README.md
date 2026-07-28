@@ -56,7 +56,7 @@ workflow file).
 | 22 | [`builder-hex0-riscv64-unified-seed`](bugs/22-builder-hex0-riscv64-unified-seed/) | [![builder-hex0-riscv64-unified-seed](../../actions/workflows/builder-hex0-riscv64-unified-seed.yml/badge.svg)](../../actions/workflows/builder-hex0-riscv64-unified-seed.yml) | **Not a bug** — the UNIFIED-seed sibling of the row 15 demonstration; contribution offer to [builder-hex0](https://github.com/ironmeld/builder-hex0) | one probing seed for both machines (`JasonGross/builder-hex0` branch `riscv64-probing-seed-capabilities`) |
 | 23 | [`mes-abtod-negative-exponent`](bugs/23-mes-abtod-negative-exponent/) | [![mes-abtod-negative-exponent](../../actions/workflows/mes-abtod-negative-exponent.yml/badge.svg)](../../actions/workflows/mes-abtod-negative-exponent.yml) | GNU Mes (`bug-mes@gnu.org`); context for the riscv64 bootstrap chain ([codeberg.org/ekaitz-zarraga/commencement.scm](https://codeberg.org/ekaitz-zarraga/commencement.scm)) -- completes the mes-abtod story of rows 1/2 | riscv64 flex/log10 root cause (branch `flex-tcc-rootcause`, `data/riscv64-flex-log10/`) |
 | 24 | [`fiwix-syscall-off-by-one`](bugs/24-fiwix-syscall-off-by-one/) | [![fiwix-syscall-off-by-one](../../actions/workflows/fiwix-syscall-off-by-one.yml/badge.svg)](../../actions/workflows/fiwix-syscall-off-by-one.yml) | Fiwix (Mikel Izal; [github.com/mikaku/Fiwix](https://github.com/mikaku/Fiwix)) — separate from the LP64 count fix (bug 7); report pending | the `num > NR_SYSCALLS` off-by-one deliberately left out of reproducer 7's count fix — a correct-count kernel still admits `num == NR_SYSCALLS` and dispatches one past the syscall table |
-| 25 | [`armv7l-stage0-from-seed`](bugs/25-armv7l-stage0-from-seed/) | [![armv7l-stage0-from-seed](../../actions/workflows/armv7l-stage0-from-seed.yml/badge.svg)](../../actions/workflows/armv7l-stage0-from-seed.yml) | **Not a bug** — demonstration that a native armv7l stage0 ladder works from the seed; upstream [stage0-posix](https://github.com/oriansj/stage0-posix) has no armv7l ladder (GAS references only) | 460-byte armv7l hex0 seed → 20 binaries → `armv7l.answers` |
+| 26 | [`armv7l-stage0-from-seed`](bugs/26-armv7l-stage0-from-seed/) | [![armv7l-stage0-from-seed](../../actions/workflows/armv7l-stage0-from-seed.yml/badge.svg)](../../actions/workflows/armv7l-stage0-from-seed.yml) | **Not a bug** — demonstration that a native armv7l stage0 ladder works from the seed; upstream [stage0-posix](https://github.com/oriansj/stage0-posix) has no armv7l ladder (GAS references only) | 460-byte armv7l hex0 seed → 20 binaries → `armv7l.answers` |
 
 
 ### 1. `mes-ldexp-stub` — GNU Mes' ldexp is a `return 0;` stub
@@ -577,7 +577,7 @@ evidence in the bootstrap project, branch `flex-tcc-rootcause`; this
 workflow demonstrates the mes defect and the arithmetic bridge from public
 sources only.)
 
-### 25. `armv7l-stage0-from-seed` — DEMONSTRATION: a 460-byte armv7l hex0 seed builds the whole stage0 ladder
+### 26. `armv7l-stage0-from-seed` — DEMONSTRATION: a 460-byte armv7l hex0 seed builds the whole stage0 ladder
 
 **This entry is not a bug** and, like rows 15 and 22, it inverts the repo's
 convention: **green means the demonstration succeeded.** Upstream
@@ -615,7 +615,7 @@ authoring time and is not re-run, as it doubles the build.)
 **Scope, stated so nothing is inferred:** this job runs **one** lineage, so it
 demonstrates from-seed reproducibility, **not** cross-lineage diversity; and it
 takes no position on whether any of this should be adopted upstream. Harness in
-[`bugs/25-armv7l-stage0-from-seed/`](bugs/25-armv7l-stage0-from-seed/).
+[`bugs/26-armv7l-stage0-from-seed/`](bugs/26-armv7l-stage0-from-seed/).
 
 ## Pinned sources
 

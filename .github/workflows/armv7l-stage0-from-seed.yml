@@ -20,4 +20,4 @@ jobs:
         with:
           platforms: arm
       - name: Demonstrate (460-byte seed -> 20 binaries -> armv7l.answers)
-        run: bash bugs/25-armv7l-stage0-from-seed/run.sh
+        run: bash bugs/26-armv7l-stage0-from-seed/run.sh
