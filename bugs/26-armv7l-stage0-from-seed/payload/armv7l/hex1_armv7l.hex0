@@ -1,0 +1,390 @@
+## Copyright (C) 2020 Jeremiah Orians
+## This file is part of stage0.
+##
+## stage0 is free software: you can redistribute it and/or modify
+## it under the terms of the GNU General Public License as published by
+## the Free Software Foundation, either version 3 of the License, or
+## (at your option) any later version.
+##
+## stage0 is distributed in the hope that it will be useful,
+## but WITHOUT ANY WARRANTY; without even the implied warranty of
+## MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+## GNU General Public License for more details.
+##
+## You should have received a copy of the GNU General Public License
+## along with stage0.  If not, see <http://www.gnu.org/licenses/>.
+
+## hex1_armv7l: hand-assembled A32 rendering of stage0-posix-armv7l's
+## GAS/hex1_x86.S reference (ARM code under an x86 filename, kept upstream),
+## instruction for instruction. hex0's language plus single-character labels
+## ':x' and 32-bit little-endian relative pointers '%x' (value = label - ip,
+## where ip has already advanced past the 4 pointer bytes, i.e.
+## target - (address_of_pointer + 4) - the same convention as x86/AArch64).
+## Two passes over the input via lseek; label table = 256 4-byte slots
+## indexed by the label character.
+## Usage: ./hex1 <input.hex1> <output-binary>
+
+## ELF Header
+
+#:ELF_base ; vaddr 0x10000
+7F 45 4C 46        ## e_ident[EI_MAG0-3] ELF's magic number
+
+01                 ## e_ident[EI_CLASS] Indicating 32 bit
+01                 ## e_ident[EI_DATA] Indicating little endianness
+01                 ## e_ident[EI_VERSION] Indicating original elf
+
+03                 ## e_ident[EI_OSABI] Set at 3 because FreeBSD is strict
+00                 ## e_ident[EI_ABIVERSION] See above
+
+00 00 00 00 00 00 00 ## e_ident[EI_PAD]
+
+02 00              ## e_type Indicating Executable
+28 00              ## e_machine Indicating 32bit ARM
+01 00 00 00        ## e_version Indicating original elf
+
+54 00 01 00        ## e_entry Address of the entry point (Number of bytes this header is + Base Address)
+34 00 00 00        ## e_phoff Address of program header table
+00 00 00 00        ## e_shoff Address of section header table
+
+00 02 00 05        ## e_flags (EABI version 5, soft-float)
+
+34 00              ## e_ehsize Indicating our 52 Byte header
+
+20 00              ## e_phentsize size of a program header table
+01 00              ## e_phnum number of entries in program table
+
+00 00              ## e_shentsize size of a section header table
+00 00              ## e_shnum number of entries in section table
+
+00 00              ## e_shstrndx index of the section names
+
+## Program Header
+
+#:ELF_program_headers ; offset 0x34
+01 00 00 00        ## p_type PT-LOAD = 1
+00 00 00 00        ## p_offset
+
+00 00 01 00        ## p_vaddr
+00 00 01 00        ## p_physaddr
+
+68 03 00 00        ## p_filesz
+68 03 00 00        ## p_memsz (label table lives in the page's zero-filled slack, as on other archs)
+
+07 00 00 00        ## p_flags PF-X|PF-W|PF-R = 7
+00 00 01 00        ## p_alignment
+
+#:ELF_text ; offset 0x54, vaddr 0x10054
+
+## Where the ELF Header is going to hit
+## Simply jump to _start
+## Our main function
+    ## Where the ELF Header is going to hit
+    ## Simply jump to _start
+    ## Our main function
+
+#:_start ; .text offset 0x0, vaddr 0x10054
+    04709DE4    ; pop {r7}    # Get the number of arguments
+    04009DE4    ; pop {r0}    # Get the program name
+    04009DE4    ; pop {r0}    # Get the actual input name
+    0010A0E3    ; mov r1, #0    # prepare read_only
+    0020A0E3    ; mov r2, #0    # extra sure
+    0570A0E3    ; mov r7, #5    # the syscall number for open()
+    000000EF    ; svc #0    # Now open that damn file
+    D8829FE5    ; ldr r8, fin_address
+    000088E5    ; str r0, [r8]    # Preserve the file pointer we were given
+    04009DE4    ; pop {r0}    # Get the actual output name
+    411200E3    ; movw r1, #577    # Prepare file as O_WRONLY|O_CREAT|O_TRUNC
+    C02100E3    ; movw r2, #448    # Prepare file as RWX for owner only (700 in octal)
+    0570A0E3    ; mov r7, #5    # the syscall number for open()
+    000000EF    ; svc #0    # Now open that damn file
+    C0829FE5    ; ldr r8, fout_address
+    000088E5    ; str r0, [r8]    # Preserve the file pointer we were given
+    0090E0E3    ; mov r9, #-1    # Our flag for byte processing
+    0030A0E3    ; mov r3, #0    # temp storage for the sum
+    0040A0E3    ; mov r4, #0    # Our starting IP
+    0A0000EB    ; bl First_pass    # Process it
+    ## rewind input file
+    A4029FE5    ; ldr r0, fin_address
+    000090E5    ; ldr r0, [r0]    # Using our input file
+    0010A0E3    ; mov r1, #0    # Offset Zero
+    0020A0E3    ; mov r2, #0    # Whence Zero
+    1370A0E3    ; mov r7, #19    # lseek
+    000000EF    ; svc #0
+    0090E0E3    ; mov r9, #-1    # Our flag for byte processing
+    0030A0E3    ; mov r3, #0    # temp storage for the sum
+    0040A0E3    ; mov r4, #0    # Our starting IP
+    310000EB    ; bl Second_pass    # Process it
+    6B0000EA    ; b Done
+
+#:First_pass ; .text offset 0x7c, vaddr 0x100d0
+    04E02DE5    ; push {r14}
+    6C0000EB    ; bl Read_byte
+    04E09DE4    ; pop {r14}
+    ## Deal with EOF
+    040070E3    ; cmp r0, #-4
+    1700000A    ; beq First_pass_done
+    ## Check for :
+    3A0050E3    ; cmp r0, #0x3a
+    0200001A    ; bne First_pass_0
+    ## Deal with label
+    04E02DE5    ; push {r14}
+    840000EB    ; bl StoreLabel
+    04E09DE4    ; pop {r14}
+
+#:First_pass_0 ; .text offset 0xa4, vaddr 0x100f8
+    ## Check for %
+    250050E3    ; cmp r0, #0x25
+    0B00000A    ; beq First_pass_pointer
+    ## Deal with everything else
+    04E02DE5    ; push {r14}
+    0F0000EB    ; bl hex    # Process our char
+    04E09DE4    ; pop {r14}
+    ## Deal with EOF
+    040070E3    ; cmp r0, #-4
+    0B00000A    ; beq First_pass_done
+    ## deal with -1 values
+    000050E3    ; cmp r0, #0
+    ECFFFFBA    ; blt First_pass
+    ## deal with toggle
+    000059E3    ; cmp r9, #0
+    0000000A    ; beq First_pass_1
+    014084E2    ; add r4, #1    # Increment IP
+
+#:First_pass_1 ; .text offset 0xd4, vaddr 0x10128
+    0990E0E1    ; mvn r9, r9
+    E7FFFFEA    ; b First_pass
+
+#:First_pass_pointer ; .text offset 0xdc, vaddr 0x10130
+    ## Deal with Pointer to label
+    04E02DE5    ; push {r14}
+    540000EB    ; bl Read_byte    # Drop the char
+    04E09DE4    ; pop {r14}
+    044084E2    ; add r4, #4    # Increment IP
+    E2FFFFEA    ; b First_pass    # Loop again
+
+#:First_pass_done ; .text offset 0xf0, vaddr 0x10144
+    1EFF2FE1    ; BX R14
+
+#:hex ; .text offset 0xf4, vaddr 0x10148
+    ## deal with EOF
+    040070E3    ; cmp r0, #-4
+    2E00000A    ; beq EOF
+    ## deal with line comments starting with ;
+    230050E3    ; cmp r0, #0x23
+    3500000A    ; beq ascii_comment
+    ## deal with line comments starting with ;
+    3B0050E3    ; cmp r0, #0x3b
+    3300000A    ; beq ascii_comment
+    ## deal all ascii less than 0
+    300050E3    ; cmp r0, #0x30
+    2F0000BA    ; blt ascii_other
+    ## deal with 0-9
+    3A0050E3    ; cmp r0, #0x3a
+    270000BA    ; blt ascii_num
+    ## deal with all ascii less than A
+    410050E3    ; cmp r0, #0x41
+    2B0000BA    ; blt ascii_other
+    ## deal with A-F
+    470050E3    ; cmp r0, #0x47
+    270000BA    ; blt ascii_high
+    ## deal with all ascii less than a
+    610050E3    ; cmp r0, #0x61
+    270000BA    ; blt ascii_other
+    ## deal with a-f
+    670050E3    ; cmp r0, #0x67
+    210000BA    ; blt ascii_low
+    ## The rest that remains needs to be ignored
+    240000EA    ; b ascii_other
+
+#:Second_pass ; .text offset 0x140, vaddr 0x10194
+    04E02DE5    ; push {r14}
+    3B0000EB    ; bl Read_byte
+    04E09DE4    ; pop {r14}
+    ## Deal with EOF
+    040070E3    ; cmp r0, #-4
+    1700000A    ; beq Second_pass_done
+    ## Simply drop the label
+    3A0050E3    ; cmp r0, #0x3a
+    0300001A    ; bne Second_pass_0
+    04E02DE5    ; push {r14}
+    340000EB    ; bl Read_byte
+    04E09DE4    ; pop {r14}
+    F4FFFFEA    ; b Second_pass
+
+#:Second_pass_0 ; .text offset 0x16c, vaddr 0x101c0
+    ## Deal with  pointer
+    250050E3    ; cmp r0, #0x25
+    0300001A    ; bne Second_pass_1
+    04E02DE5    ; push {r14}
+    520000EB    ; bl StorePointer
+    04E09DE4    ; pop {r14}
+    EEFFFFEA    ; b Second_pass
+
+#:Second_pass_1 ; .text offset 0x184, vaddr 0x101d8
+    ## Deal with everything else
+    04E02DE5    ; push {r14}
+    D9FFFFEB    ; bl hex    # Process our char
+    04E09DE4    ; pop {r14}
+    ## Deal with EOF
+    040070E3    ; cmp r0, #-4
+    0600000A    ; beq Second_pass_done
+    ## deal with -1 values
+    000050E3    ; cmp r0, #0
+    E7FFFFBA    ; blt Second_pass
+    ## deal with toggle
+    000059E3    ; cmp r9, #0
+    1500000A    ; beq print
+    ## process first byte of pair
+    0030A0E1    ; mov r3, r0
+    0090A0E3    ; mov r9, #0
+    E2FFFFEA    ; b Second_pass
+
+#:Second_pass_done ; .text offset 0x1b4, vaddr 0x10208
+    1EFF2FE1    ; bx r14
+
+#:EOF ; .text offset 0x1b8, vaddr 0x1020c
+    1EFF2FE1    ; bx r14
+
+#:ascii_num ; .text offset 0x1bc, vaddr 0x10210
+    300040E2    ; sub r0, #0x30
+    1EFF2FE1    ; bx r14
+
+#:ascii_low ; .text offset 0x1c4, vaddr 0x10218
+    570040E2    ; sub r0, #0x57
+    1EFF2FE1    ; bx r14
+
+#:ascii_high ; .text offset 0x1cc, vaddr 0x10220
+    370040E2    ; sub r0, #0x37
+    1EFF2FE1    ; bx r14
+
+#:ascii_other ; .text offset 0x1d4, vaddr 0x10228
+    0000E0E3    ; mov r0, #-1
+    1EFF2FE1    ; bx r14
+
+#:ascii_comment ; .text offset 0x1dc, vaddr 0x10230
+    04E02DE5    ; push {r14}
+    140000EB    ; bl Read_byte
+    04E09DE4    ; pop {r14}
+    0D0050E3    ; cmp r0, #0xd
+    0100000A    ; beq ascii_comment_cr
+    0A0050E3    ; cmp r0, #0xa
+    F8FFFF1A    ; bne ascii_comment
+
+#:ascii_comment_cr ; .text offset 0x1f8, vaddr 0x1024c
+    0000E0E3    ; mov r0, #-1
+    1EFF2FE1    ; bx r14
+    ## process second byte of pair
+
+#:print ; .text offset 0x200, vaddr 0x10254
+    ## update the sum and store in output
+    0332A0E1    ; lsl r3, #4
+    030080E0    ; add r0, r3
+    F4809FE5    ; ldr r8, table_address
+    000088E5    ; str r0, [r8]
+    ## flip the toggle
+    0990E0E1    ; mvn r9, r9
+    ## Print our first Hex
+    0120A0E3    ; mov r2, #1    # set the size of chars we want
+    04E02DE5    ; push {r14}
+    150000EB    ; bl print_chars
+    04E09DE4    ; pop {r14}
+    014084E2    ; add r4, #1    # Increment IP
+    C4FFFFEA    ; b Second_pass
+
+#:Done ; .text offset 0x22c, vaddr 0x10280
+    ## program completed Successfully
+    0000A0E3    ; mov r0, #0    # All is well
+    0170A0E3    ; mov r7, #1    # put the exit syscall number in r7
+    000000EF    ; svc #0    # Call it a good day
+
+#:Read_byte ; .text offset 0x238, vaddr 0x1028c
+    06002DE9    ; push {r1, r2}
+    ## Attempt to read 1 byte from STDIN
+    0120A0E3    ; mov r2, #1    # set the size of chars we want
+    BC109FE5    ; ldr r1, table_address    # Where to put it
+    B0009FE5    ; ldr r0, fin_address
+    000090E5    ; ldr r0, [r0]    # Where are we reading from
+    0370A0E3    ; mov r7, #3    # the syscall number for read
+    000000EF    ; svc #0    # call the Kernel
+    000050E3    ; cmp r0, #0    # check what we got
+    0300000A    ; beq Read_byte_1    # Got EOF call it done
+    ## load byte
+    A0009FE5    ; ldr r0, table_address
+    0000D0E5    ; ldrb r0, [r0]    # load char
+    0600BDE8    ; pop {r1, r2}
+    1EFF2FE1    ; bx r14
+    ## Deal with EOF
+
+#:Read_byte_1 ; .text offset 0x26c, vaddr 0x102c0
+    0300E0E3    ; mov r0, #-4    # Put EOF in r0
+    0600BDE8    ; pop {r1, r2}
+    1EFF2FE1    ; bx r14
+
+#:print_chars ; .text offset 0x278, vaddr 0x102cc
+    04102DE5    ; push {r1}
+    80109FE5    ; ldr r1, table_address    # What we are writing
+    78009FE5    ; ldr r0, fout_address
+    000090E5    ; ldr r0, [r0]    # Write to target file
+    0470A0E3    ; mov r7, #4    # the syscall number for write
+    000000EF    ; svc #0    # call the Kernel
+    04109DE4    ; pop {r1}
+    1EFF2FE1    ; bx r14
+
+#:Get_table_target ; .text offset 0x298, vaddr 0x102ec
+    04E02DE5    ; push {r14}
+    E5FFFFEB    ; bl Read_byte    # Get single char label
+    04E09DE4    ; pop {r14}
+    0001A0E1    ; lsl r0, #2    # Each label in table takes 4 bytes to store
+    54809FE5    ; ldr r8, table_address
+    080080E0    ; add r0, r8    # Calculate offset
+    1EFF2FE1    ; bx r14
+
+#:StoreLabel ; .text offset 0x2b4, vaddr 0x10308
+    04E02DE5    ; push {r14}
+    F6FFFFEB    ; bl Get_table_target
+    04E09DE4    ; pop {r14}
+    004080E5    ; str r4, [r0]    # Write out pointer to table
+    1EFF2FE1    ; bx r14
+
+#:StorePointer ; .text offset 0x2c8, vaddr 0x1031c
+    044084E2    ; add r4, #4    # Increment IP
+    04E02DE5    ; push {r14}
+    F0FFFFEB    ; bl Get_table_target    # Get address of pointer
+    04E09DE4    ; pop {r14}
+    000090E5    ; ldr r0, [r0]    # Get pointer
+    040040E0    ; sub r0, r4    # target - ip
+    1C809FE5    ; ldr r8, table_address
+    000088E5    ; str r0, [r8]    # put value in output
+    0420A0E3    ; mov r2, #4    # set the size of chars we want
+    04E02DE5    ; push {r14}
+    E0FFFFEB    ; bl print_chars
+    04E09DE4    ; pop {r14}
+    1EFF2FE1    ; bx r14
+    ## Because ARM doesn't support loading/storing directly to different segments in a single instruction
+
+#:ELF_end ; .text offset 0x2fc, vaddr 0x10350
+
+#:fin ; .text offset 0x2fc, vaddr 0x10350
+
+#:fout ; .text offset 0x2fc, vaddr 0x10350
+
+#:table ; .text offset 0x2fc, vaddr 0x10350
+
+## literal pool (data-cell addresses; ARM cannot address across segments
+## in one instruction) — .text offset 0x2fc, vaddr 0x10350
+#:fin_address
+    5C030100   ; .word fin (0x1035c)
+#:fout_address
+    60030100   ; .word fout (0x10360)
+#:table_address
+    64030100   ; .word table (0x10364)
+
+## data (file offset 0x35c, vaddr 0x1035c); the label table
+## extends 1024 bytes past the file image into the zero-filled remainder
+## of the RWX page (upstream convention: p_filesz == p_memsz, page slack)
+#:fin
+    00000000
+#:fout
+    00000000
+#:table
+    00000000

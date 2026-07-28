@@ -59,6 +59,7 @@ workflow file).
 | 23 | [`mes-abtod-negative-exponent`](bugs/23-mes-abtod-negative-exponent/) | [![mes-abtod-negative-exponent](../../actions/workflows/mes-abtod-negative-exponent.yml/badge.svg)](../../actions/workflows/mes-abtod-negative-exponent.yml) | GNU Mes (`bug-mes@gnu.org`); context for the riscv64 bootstrap chain ([codeberg.org/ekaitz-zarraga/commencement.scm](https://codeberg.org/ekaitz-zarraga/commencement.scm)) -- completes the mes-abtod story of rows 1/2 | riscv64 flex/log10 root cause (branch `flex-tcc-rootcause`, `data/riscv64-flex-log10/`) |
 | 24 | [`fiwix-syscall-off-by-one`](bugs/24-fiwix-syscall-off-by-one/) | [![fiwix-syscall-off-by-one](../../actions/workflows/fiwix-syscall-off-by-one.yml/badge.svg)](../../actions/workflows/fiwix-syscall-off-by-one.yml) | Fiwix (Mikel Izal; [github.com/mikaku/Fiwix](https://github.com/mikaku/Fiwix)) — separate from the LP64 count fix (bug 7); report pending | the `num > NR_SYSCALLS` off-by-one deliberately left out of reproducer 7's count fix — a correct-count kernel still admits `num == NR_SYSCALLS` and dispatches one past the syscall table |
 | 25 | [`m2libc-armv7l-unlink-arg`](bugs/25-m2libc-armv7l-unlink-arg/) | [![m2libc-armv7l-unlink-arg](../../actions/workflows/m2libc-armv7l-unlink-arg.yml/badge.svg)](../../actions/workflows/m2libc-armv7l-unlink-arg.yml) | M2libc (Jeremiah Orians; [github.com/oriansj/M2libc](https://github.com/oriansj/M2libc)) | native armv7l stage0 ladder (`scripts/s7-gate.sh`, branch `stage0-armv7l`) — a chain-built `rm` cannot delete |
+| 26 | [`armv7l-stage0-from-seed`](bugs/26-armv7l-stage0-from-seed/) | [![armv7l-stage0-from-seed](../../actions/workflows/armv7l-stage0-from-seed.yml/badge.svg)](../../actions/workflows/armv7l-stage0-from-seed.yml) | **Not a bug** — demonstration that a native armv7l stage0 ladder works from the seed; upstream [stage0-posix](https://github.com/oriansj/stage0-posix) has no armv7l ladder (GAS references only) | 460-byte armv7l hex0 seed → 20 binaries → `armv7l.answers` |
 
 
 ### 1. `mes-ldexp-stub` — GNU Mes' ldexp is a `return 0;` stub
@@ -616,6 +617,46 @@ re-reads the live M2libc default branch on every run and fails loudly if
 `unlink()` grows the dereference (or a sibling loses it), so a silent upstream
 fix surfaces as a red rather than a stale green.
 
+### 26. `armv7l-stage0-from-seed` — DEMONSTRATION: a 460-byte armv7l hex0 seed builds the whole stage0 ladder
+
+**This entry is not a bug** and, like rows 15 and 22, it inverts the repo's
+convention: **green means the demonstration succeeded.** Upstream
+[stage0-posix](https://github.com/oriansj/stage0-posix) has no armv7l ladder —
+the armv7l port ships GAS reference sources only, with no hex0 seed, no kaem
+scripts and no stage0-cc support layer — so an armv7l stage0 has never been
+runnable from a seed. This job is the evidence that one now is.
+
+The workflow asserts, in order. **Seed reconstructed from text:** rendering the
+checked-in commented listing yields exactly the 460-byte seed at a pinned
+sha256, so the bytes that execute are provably the bytes a human can audit —
+nothing opaque is shipped (the whole checked-in payload is text: listings, M1
+and hex2 sources, and kaem scripts). **Ladder edge:** that seed run on its own
+source reproduces itself byte-identically, and builds the 1,162-byte kaem seed.
+**From-seed enforced, not asserted:** the tree is scanned and must hold exactly
+those two ELF binaries; a third anywhere fails the job. **The ladder runs:**
+`kaem.armv7l` drives the seed, mini and full kaem stages plus mescc-tools-extra
+entirely under binaries it built itself, with all upstream sources fetched
+fresh at commit-verified pins. **Answers reproduce:** all 20 built binaries
+match the checked-in `armv7l.answers`, checked twice — once by the ladder's own
+chain-built `sha256sum` and once by the runner's GNU coreutils. Those two share
+no code, and that is the *only* independence claim the job makes; it is
+labelled as such in the job output. Four intermediate binaries are additionally
+checked against sha256 values fixed on a different machine, so the build is
+shown to be bit-reproducible across hosts.
+
+Two **red legs run on every invocation** rather than only at authoring time:
+flipping one byte of a built binary must make the answers check name that
+binary `FAILED`, and planting a third ELF must make the from-seed scan refuse
+the tree. Each fails with its own named assertion, so a vacuous harness would
+be caught. (A third, costlier red — perturbing one `--base-address` flag so
+that exactly `armv7l/bin/M1` fails and nothing else does — was verified at
+authoring time and is not re-run, as it doubles the build.)
+
+**Scope, stated so nothing is inferred:** this job runs **one** lineage, so it
+demonstrates from-seed reproducibility, **not** cross-lineage diversity; and it
+takes no position on whether any of this should be adopted upstream. Harness in
+[`bugs/26-armv7l-stage0-from-seed/`](bugs/26-armv7l-stage0-from-seed/).
+
 ## Pinned sources
 
 | Source | Pin |
@@ -637,6 +678,7 @@ fix surfaces as a red rather than a stale green.
 | tcc (mes lineage) | lilypond.org/janneke/tcc `tcc-0.9.26-1147-gee75a10c.tar.gz` sha256 `6b8cbd0a…e819f` (= live-bootstrap's own pin) and `tcc-0.9.26-1157-gdd46e018.tar.gz` sha256 `3748c0aa…2232e` |
 | Gash-Utils | `gash-utils-0.2.0.tar.gz` from download.savannah.gnu.org, sha256 `e6aae5a6…59d4a3` |
 | r6rs-compression | git.ngyro.com/r6rs-compression @ `a2d01f24d5ad703ed2742b97053d19dcd42f89b1` (the commit bootar v1b pins) |
+| stage0-posix (armv7l ladder demo) | oriansj repos, commit-verified in the job: `M2libc` `68a23cfd…cc4e`, `M2-Planet` `bd2fe4b0…665d`, `M2-Mesoplanet` `4b011a85…9547`, `mescc-tools` `5adfbf33…9ac4`, `mescc-tools-extra` `a151c245…a83b` |
 | struct-pack / hashing | gitlab.com/weinholt @ `11b71963…239ee` / `eb280801…ef0cb` (likewise bootar's pins) |
 | musl | `musl-1.1.24.tar.gz` from musl.libc.org, sha256 `1370c9a8…022a3` |
 | M2libc / M2-Planet / mescc-tools (armv7l `unlink`) | github.com/oriansj, pinned: `M2libc b7e5d1cb`, `M2-Planet 34fbd5c2`, `mescc-tools d59464d2` |

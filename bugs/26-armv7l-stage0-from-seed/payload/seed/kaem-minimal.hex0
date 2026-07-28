@@ -1,0 +1,474 @@
+## Copyright (C) 2020 Jeremiah Orians
+## This file is part of stage0.
+##
+## stage0 is free software: you can redistribute it and/or modify
+## it under the terms of the GNU General Public License as published by
+## the Free Software Foundation, either version 3 of the License, or
+## (at your option) any later version.
+##
+## stage0 is distributed in the hope that it will be useful,
+## but WITHOUT ANY WARRANTY; without even the implied warranty of
+## MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+## GNU General Public License for more details.
+##
+## You should have received a copy of the GNU General Public License
+## along with stage0.  If not, see <http://www.gnu.org/licenses/>.
+
+## kaem-minimal (kaem-optional-seed) for armv7l: hand-assembled A32 rendering
+## of stage0-posix-armv7l's GAS/kaem-minimal.S reference, instruction for
+## instruction. A minimal script runner: reads <script> (argv[1], default
+## "kaem.run"), tokenizes on space/tab, '\n' ends a command, '#' starts a
+## line comment, '"' collects a raw string, '\' drops the next char; prints
+## " +> cmd args" then fork/execve/waitpid each command with the inherited
+## envp; any child failure or open/EOF error aborts hard with exit(1).
+## Built by: hex0 kaem-minimal.hex0 kaem-0   (and the bootstrap-seeds binary
+## kaem-optional-seed is byte-identical to that output, as on other archs)
+## Note: several data words land at 2-mod-4 addresses (raw concatenation
+## after the .asciz strings, as the reference assembles); ARMv7-A ldr/str
+## support this with SCTLR.A=0, which Linux and qemu-user guarantee.
+
+## ELF Header
+
+#:ELF_base ; vaddr 0x10000
+7F 45 4C 46        ## e_ident[EI_MAG0-3] ELF's magic number
+
+01                 ## e_ident[EI_CLASS] Indicating 32 bit
+01                 ## e_ident[EI_DATA] Indicating little endianness
+01                 ## e_ident[EI_VERSION] Indicating original elf
+
+03                 ## e_ident[EI_OSABI] Set at 3 because FreeBSD is strict
+00                 ## e_ident[EI_ABIVERSION] See above
+
+00 00 00 00 00 00 00 ## e_ident[EI_PAD]
+
+02 00              ## e_type Indicating Executable
+28 00              ## e_machine Indicating 32bit ARM
+01 00 00 00        ## e_version Indicating original elf
+
+54 00 01 00        ## e_entry Address of the entry point (Number of bytes this header is + Base Address)
+34 00 00 00        ## e_phoff Address of program header table
+00 00 00 00        ## e_shoff Address of section header table
+
+00 02 00 05        ## e_flags (EABI version 5, soft-float)
+
+34 00              ## e_ehsize Indicating our 52 Byte header
+
+20 00              ## e_phentsize size of a program header table
+01 00              ## e_phnum number of entries in program table
+
+00 00              ## e_shentsize size of a section header table
+00 00              ## e_shnum number of entries in section table
+
+00 00              ## e_shstrndx index of the section names
+
+## Program Header
+
+#:ELF_program_headers ; offset 0x34
+01 00 00 00        ## p_type PT-LOAD = 1
+00 00 00 00        ## p_offset
+
+00 00 01 00        ## p_vaddr
+00 00 01 00        ## p_physaddr
+
+8A 04 00 00        ## p_filesz
+8A 04 00 00        ## p_memsz
+
+07 00 00 00        ## p_flags PF-X|PF-W|PF-R = 7
+00 00 01 00        ## p_alignment
+
+#:ELF_text ; offset 0x54, vaddr 0x10054
+
+## Where the ELF Header is going to hit
+## Simply jump to _start
+## Our main function
+    ## Where the ELF Header is going to hit
+    ## Simply jump to _start
+    ## Our main function
+
+#:_start ; .text offset 0x0, vaddr 0x10054
+    04009DE4    ; pop {r0}    # Get the number of arguments
+    04009DE4    ; pop {r0}    # Get the program name
+    04009DE4    ; pop {r0}    # Get the actual input name
+    000050E3    ; cmp r0, #0    # Check for missing input
+    0100001A    ; bne _start_out    # Have real input
+    04002DE5    ; push {r0}    # Need to adjust stack
+    A4039FE5    ; ldr r0, default_file_address    # Use "kaem.run"
+
+#:_start_out ; .text offset 0x1c, vaddr 0x10070
+    0010A0E3    ; mov r1, #0    # prepare read_only
+    0570A0E3    ; mov r7, #5    # the syscall number for open()
+    000000EF    ; svc #0    # Now open that damn file
+    000050E3    ; cmp r0, #0    # IF NULL We couldn't open the file
+    3F0000DA    ; ble Exit_Failure    # Abort hard
+    98839FE5    ; ldr r8, script_address
+    000088E5    ; str r0, [r8]    # Set input pointer
+    04009DE4    ; pop {r0}    # Get start of envp
+    0DC0A0E1    ; mov r12, r13    # Protect envp
+    2D70A0E3    ; mov r7, #45    # the Syscall # for SYS_BRK
+    0000A0E3    ; mov r0, #0    # Get current brk
+    000000EF    ; svc #0    # Let the kernel do the work
+    90839FE5    ; ldr r8, MALLOC_address
+    000088E5    ; str r0, [r8]    # Set our malloc pointer
+    ## Where the main work gets done
+    ## Using R1 for tokens and R2 for tokens[i]
+
+#:main_loop ; .text offset 0x54, vaddr 0x100a8
+    80839FE5    ; ldr r8, max_args_address
+    000098E5    ; ldr r0, [r8]    # Using 256 char* of space
+    04E02DE5    ; push {r14}
+    950000EB    ; bl malloc    # get it
+    04E09DE4    ; pop {r14}
+    0010A0E1    ; mov r1, r0    # set tokens
+    0120A0E1    ; mov r2, r1    # I = 0
+    0000A0E3    ; mov r0, #0    # Using 0
+    6C839FE5    ; ldr r8, status_address
+    000088E5    ; str r0, [r8]    # status = 0
+    54839FE5    ; ldr r8, command_done_address
+    000088E5    ; str r0, [r8]    # command_done = 0
+    ## Using R0 for result and R1 for tokens[i]
+
+#:collect_command ; .text offset 0x84, vaddr 0x100d8
+    04E02DE5    ; push {r14}
+    410000EB    ; bl collect_token    # Get another token
+    04E09DE4    ; pop {r14}
+    000050E3    ; cmp r0, #0    # if NULL == result
+    0100000A    ; beq collect_command_comment    # It is a comment, don't store
+    000082E5    ; str r0, [r2]    # tokens[i] = result
+    042082E2    ; add r2, #4    # i = i + 1 (adjusted for char* size)
+
+#:collect_command_comment ; .text offset 0xa0, vaddr 0x100f4
+    30839FE5    ; ldr r8, command_done_address
+    000098E5    ; ldr r0, [r8]    # Using command_done
+    000050E3    ; cmp r0, #0    # IF 0 == command_done
+    F4FFFF0A    ; beq collect_command    # keep looping
+    ## Deal with line comments
+    010052E1    ; cmp r2, r1    # if 0 < i
+    E6FFFF0A    ; beq main_loop    # It was a comment
+    04E02DE5    ; push {r14}
+    1E0000EB    ; bl print_command    # print the command
+    04E09DE4    ; pop {r14}
+    000091E5    ; ldr r0, [r1]    # program = tokens[0]
+    000050E3    ; cmp r0, #0    # IF NULL == program
+    1700000A    ; beq Exit_Failure    # Some shit went down, abort
+    04102DE5    ; push {r1}    # Protect Tokens
+    0270A0E3    ; mov r7, #2    # FORKing
+    000000EF    ; svc #0    # int f = FORK()
+    04109DE4    ; pop {r1}    # Restore Tokens
+    000050E3    ; cmp r0, #0    # Check fork
+    110000BA    ; blt Exit_Failure    # IF f == -1 abort hard
+    0400001A    ; bne collect_command_parent    # IF f == 0 it is child
+    ## Deal with child case
+    0B70A0E3    ; mov r7, #11    # EXECVE
+    0C20A0E1    ; mov r2, r12    # third arg = envp
+    ## R1 aready has tokens          @ second arg = tokens
+    000091E5    ; ldr r0, [r1]    # program = tokens[0]
+    000000EF    ; svc #0    # execve(program, tokens, envp);
+    0B0000EA    ; b Exit_Failure    # return error
+
+#:collect_command_parent ; .text offset 0x100, vaddr 0x10154
+    ## R0 already has f              @ first arg = f
+    E0129FE5    ; ldr r1, status_address    # second arg = &status
+    0020A0E3    ; mov r2, #0    # third arg = NULL
+    7270A0E3    ; mov r7, #114    # WAITPID
+    000000EF    ; svc #0    # waitpid(f, &status, 0);
+    D0829FE5    ; ldr r8, status_address
+    000098E5    ; ldr r0, [r8]    # Using status
+    000050E3    ; cmp r0, #0    # IF 0 == status
+    CCFFFF0A    ; beq main_loop    # Loop forever
+    ## Deal with very unhappy case
+    A4029FE5    ; ldr r0, hard_address    # Using "Subprocess error\nABORTING HARD\n"
+    04E02DE5    ; push {r14}
+    840000EB    ; bl File_Print    # Print it
+    04E09DE4    ; pop {r14}
+    ## Exit_Failure function
+    ## Receives nothing
+    ## And aborts hard
+    ## Does NOT return
+
+#:Exit_Failure ; .text offset 0x130, vaddr 0x10184
+    0100A0E3    ; mov r0, #1    # All is wrong
+    0170A0E3    ; mov r7, #1    # put the exit syscall number in r7
+    000000EF    ; svc #0    # Call it a bad day
+    ## print_command function
+    ## Recieves tokens[j] in R1 and tokens[i] in R2
+    ## Modifies R0
+
+#:print_command ; .text offset 0x13c, vaddr 0x10190
+    04102DE5    ; push {r1}    # Protect R1
+    80029FE5    ; ldr r0, prefix_address    # using " +> "
+    04E02DE5    ; push {r14}
+    7C0000EB    ; bl File_Print    # print it
+    04E09DE4    ; pop {r14}
+
+#:print_command_loop ; .text offset 0x150, vaddr 0x101a4
+    000091E5    ; ldr r0, [r1]    # using tokens[j]
+    04E02DE5    ; push {r14}
+    780000EB    ; bl File_Print    # print it
+    04E09DE4    ; pop {r14}
+    041081E2    ; add r1, #4    # j = j + 1
+    2000A0E3    ; mov r0, #32    # using ' '
+    04E02DE5    ; push {r14}
+    830000EB    ; bl fputc    # print it
+    04E09DE4    ; pop {r14}
+    020051E1    ; cmp r1, r2    # IF j < i
+    F4FFFF1A    ; bne print_command_loop    # otherwise keep looping
+    0A00A0E3    ; mov r0, #10    # using '\n'
+    04E02DE5    ; push {r14}
+    7D0000EB    ; bl fputc    # print it
+    04E09DE4    ; pop {r14}
+    04109DE4    ; pop {r1}    # Restore R1
+    1EFF2FE1    ; bx r14
+    ## collect_token function
+    ## Recieves nothing
+    ## Overwrites R0
+    ## Uses R0 as C, R1 as token and R2 as token[i]
+
+#:collect_token ; .text offset 0x194, vaddr 0x101e8
+    04102DE5    ; push {r1}    # Protect R1
+    04202DE5    ; push {r2}    # Protect R2
+    3C829FE5    ; ldr r8, max_string_address
+    000098E5    ; ldr r0, [r8]    # Using max_string
+    04E02DE5    ; push {r14}
+    430000EB    ; bl malloc    # allocate space
+    04E09DE4    ; pop {r14}
+    0010A0E1    ; mov r1, r0    # token = malloc(max_string);
+    0020A0E1    ; mov r2, r0    # i = 0; set token[i]
+
+#:collect_token_loop ; .text offset 0x1b8, vaddr 0x1020c
+    04E02DE5    ; push {r14}
+    4D0000EB    ; bl fgetc    # c = fgetc(input);
+    04E09DE4    ; pop {r14}
+    040070E3    ; cmp r0, #-4    # if C == EOF
+    7A00000A    ; beq Done    # We are done
+    200050E3    ; cmp r0, #32    # IF C == ' '
+    1F00000A    ; beq collect_token_done    # Space terminates token
+    090050E3    ; cmp r0, #9    # IF C == '\t'
+    1D00000A    ; beq collect_token_done    # tab terminates token
+    0A0050E3    ; cmp r0, #10    # IF C == '\n'
+    0300001A    ; bne collect_token_string    # otherwise check next
+    ## It is a newline
+    0100A0E3    ; mov r0, #1    # Using 1
+    E8819FE5    ; ldr r8, command_done_address
+    000088E5    ; str r0, [r8]    # Set command_done = TRUE
+    170000EA    ; b collect_token_done    # Be done
+
+#:collect_token_string ; .text offset 0x1f4, vaddr 0x10248
+    220050E3    ; cmp r0, #34    # IF C == '\"'
+    0300001A    ; bne collect_token_comment    # otherwise check next
+    ## It is a RAW STRING
+    04E02DE5    ; push {r14}
+    1A0000EB    ; bl collect_string    # Get the rest of the string
+    04E09DE4    ; pop {r14}
+    110000EA    ; b collect_token_done    # Be done
+
+#:collect_token_comment ; .text offset 0x20c, vaddr 0x10260
+    230050E3    ; cmp r0, #35    # IF C == '#'
+    0600001A    ; bne collect_token_escape    # otherwise check next
+    ## It is a line comment
+    04E02DE5    ; push {r14}
+    1F0000EB    ; bl collect_comment    # Read it all
+    04E09DE4    ; pop {r14}
+    0100A0E3    ; mov r0, #1    # Using 1
+    AC819FE5    ; ldr r8, command_done_address
+    000088E5    ; str r0, [r8]    # Set command_done = TRUE
+    080000EA    ; b collect_token_done    # Be done
+
+#:collect_token_escape ; .text offset 0x230, vaddr 0x10284
+    5C0050E3    ; cmp r0, #92    # IF C == '\\'
+    0300001A    ; bne collect_token_other    # otherwise just store it
+    ## It is an escape char
+    04E02DE5    ; push {r14}
+    2D0000EB    ; bl fgetc    # Read the char to drop
+    04E09DE4    ; pop {r14}
+    020000EA    ; b collect_token_done    # Be done
+
+#:collect_token_other ; .text offset 0x248, vaddr 0x1029c
+    0000C2E5    ; strb r0, [r2]    # token[i] = C
+    012082E2    ; add r2, #1    # i = i + 1
+    D8FFFFEA    ; b collect_token_loop    # Keep going
+
+#:collect_token_done ; .text offset 0x254, vaddr 0x102a8
+    020051E1    ; cmp r1, r2    # IF i == 0
+    0000001A    ; bne collect_token_good    # otherwise return the token
+    0010A0E3    ; mov r1, #0    # token = NULL
+
+#:collect_token_good ; .text offset 0x260, vaddr 0x102b4
+    0100A0E1    ; mov r0, r1    # Return token
+    04209DE4    ; pop {r2}    # Restore R2
+    04109DE4    ; pop {r1}    # Restore R1
+    1EFF2FE1    ; bx r14
+    ## collect_string function
+    ## Recieves target[index] in R2
+    ## Modifies R0
+    ## Uses R0 as C
+
+#:collect_string ; .text offset 0x270, vaddr 0x102c4
+    04E02DE5    ; push {r14}
+    1F0000EB    ; bl fgetc    # C = fgetc(input)
+    04E09DE4    ; pop {r14}
+    040070E3    ; cmp r0, #-4    # if C == EOF
+    AAFFFF0A    ; beq Exit_Failure    # Something went horribly wrong
+    220050E3    ; cmp r0, #34    # IF C == '\"'
+    0200000A    ; beq collect_string_done    # be done
+    ## deal with inside of string
+    0000C2E5    ; strb r0, [r2]    # target[index] = C
+    012082E2    ; add r2, #1    # index = index + 1
+    F5FFFFEA    ; b collect_string    # Keep going
+
+#:collect_string_done ; .text offset 0x298, vaddr 0x102ec
+    1EFF2FE1    ; bx r14
+    ## collect_comment function
+    ## Recieves nothing
+    ## Modifies R0
+    ## uses R0 as Int C
+    ## Just throws away everything it reads
+
+#:collect_comment ; .text offset 0x29c, vaddr 0x102f0
+    04E02DE5    ; push {r14}
+    140000EB    ; bl fgetc    # C = fgetc(input)
+    04E09DE4    ; pop {r14}
+    040070E3    ; cmp r0, #-4    # IF C == EOF
+    9FFFFF0A    ; beq Exit_Failure    # abort hard
+    0A0050E3    ; cmp r0, #10    # IF C == '\n'
+    F8FFFF1A    ; bne collect_comment    # otherwise keep looping
+    1EFF2FE1    ; bx r14
+    ## Malloc isn't actually required if the program being built fits in the initial memory
+    ## However, it doesn't take much to add it.
+    ## Requires [MALLOC] to be initialized and R0 to have the number of desired bytes
+
+#:malloc ; .text offset 0x2bc, vaddr 0x10310
+    04102DE5    ; push {r1}    # Protect R1
+    04202DE5    ; push {r2}    # Protect R2
+    04302DE5    ; push {r3}    # Protect R3
+    14819FE5    ; ldr r8, MALLOC_address
+    001098E5    ; ldr r1, [r8]    # Using the current pointer
+    010080E0    ; add r0, r1    # Request the number of desired bytes
+    2D70A0E3    ; mov r7, #45    # the Syscall # for SYS_BRK
+    000000EF    ; svc #0    # call the Kernel
+    001098E5    ; ldr r1, [r8]    # get old pointer
+    000088E5    ; str r0, [r8]    # Update pointer
+    0100A0E1    ; mov r0, r1    # Return pointer
+    04309DE4    ; pop {r3}    # Restore R3
+    04209DE4    ; pop {r2}    # Restore R2
+    04109DE4    ; pop {r1}    # Restore R1
+    1EFF2FE1    ; bx r14
+    ## fgetc function
+    ## Loads FILE* from [script]
+    ## Returns -4 (EOF) or char in R0
+
+#:fgetc ; .text offset 0x2f8, vaddr 0x1034c
+    04302DE5    ; push {r3}    # Protect R3
+    04202DE5    ; push {r2}    # Protect R2
+    04102DE5    ; push {r1}    # Protect R1
+    0300E0E3    ; mov r0, #-4    # Put EOF in r0
+    04002DE5    ; push {r0}    # Assume bad (If nothing read, value will remain EOF)
+    0D10A0E1    ; mov r1, r13    # Get stack address
+    B8809FE5    ; ldr r8, script_address
+    000098E5    ; ldr r0, [r8]    # Where are we reading from
+    0370A0E3    ; mov r7, #3    # the syscall number for read
+    0120A0E3    ; mov r2, #1    # set the size of chars we want
+    000000EF    ; svc #0    # call the Kernel
+    04009DE4    ; pop {r0}    # Get either char or EOF
+    040070E3    ; cmp r0, #-4
+    FF000012    ; andne r0, #0xFF    # truncate to byte if not EOF
+    04109DE4    ; pop {r1}    # Restore R1
+    04209DE4    ; pop {r2}    # Restore R2
+    04309DE4    ; pop {r3}    # Restore R3
+    1EFF2FE1    ; bx r14
+    ## File_Print function
+    ## Receives CHAR* in R0
+    ## calls fputc for every non-null char
+
+#:File_Print ; .text offset 0x340, vaddr 0x10394
+    04102DE5    ; push {r1}    # Protect R1
+    04202DE5    ; push {r2}    # Protect R2
+    0010A0E1    ; mov r1, r0    # Protect S
+    000050E3    ; cmp r0, #0    # Protect against nulls
+    0700000A    ; beq File_Print_Done    # Simply don't try to print them
+
+#:File_Print_Loop ; .text offset 0x354, vaddr 0x103a8
+    0000D1E5    ; ldrb r0, [r1]    # Read byte
+    000050E3    ; cmp r0, #0    # Check for NULL
+    0400000A    ; beq File_Print_Done    # Stop at NULL
+    04E02DE5    ; push {r14}
+    050000EB    ; bl fputc    # write it
+    04E09DE4    ; pop {r14}
+    011081E2    ; add r1, #1    # S = S + 1
+    F7FFFFEA    ; b File_Print_Loop    # Keep going
+
+#:File_Print_Done ; .text offset 0x374, vaddr 0x103c8
+    04209DE4    ; pop {r2}    # Restore R2
+    04109DE4    ; pop {r1}    # Restore R1
+    1EFF2FE1    ; bx r14
+    ## fputc function
+    ## receives CHAR in R0 and load FILE* from stdout
+    ## writes char and returns
+
+#:fputc ; .text offset 0x380, vaddr 0x103d4
+    04302DE5    ; push {r3}    # Protect R3
+    04202DE5    ; push {r2}    # protect R2
+    04102DE5    ; push {r1}    # protect R1
+    04002DE5    ; push {r0}    # We are writing r0
+    0D10A0E1    ; mov r1, r13    # Get stack address
+    0100A0E3    ; mov r0, #1    # Write to target file
+    0470A0E3    ; mov r7, #4    # the syscall number for write
+    0120A0E3    ; mov r2, #1    # set the size of chars we want
+    000000EF    ; svc #0    # call the Kernel
+    04009DE4    ; pop {r0}    # Restore stack
+    04109DE4    ; pop {r1}    # Restore R1
+    04209DE4    ; pop {r2}    # Restore R2
+    04309DE4    ; pop {r3}    # Restore R3
+    1EFF2FE1    ; bx r14
+
+#:Done ; .text offset 0x3b8, vaddr 0x1040c
+    ## program completed Successfully
+    0000A0E3    ; mov r0, #0    # All is well
+    0170A0E3    ; mov r7, #1    # put the exit syscall number in r0
+    000000EF    ; svc #0    # Call it a good day
+    ## Because ARM doesn't support loading/storing directly to different segments in a single instruction
+
+## Because ARM doesn't support loading/storing directly to different segments
+## in a single instruction, the addresses of our data cells live in this
+## literal pool (.text offset 0x3c4, vaddr 0x10418)
+#:default_file_address
+    40040100   ; .word default_file (0x10440)
+#:prefix_address
+    49040100   ; .word prefix (0x10449)
+#:hard_address
+    4E040100   ; .word hard (0x1044e)
+#:script_address
+    6E040100   ; .word script (0x1046e)
+#:tokens_address
+    72040100   ; .word tokens (0x10472)
+#:command_done_address
+    76040100   ; .word command_done (0x10476)
+#:max_args_address
+    7A040100   ; .word max_args (0x1047a)
+#:max_string_address
+    7E040100   ; .word max_string (0x1047e)
+#:MALLOC_address
+    82040100   ; .word MALLOC (0x10482)
+#:status_address
+    86040100   ; .word status (0x10486)
+
+## data (file offset 0x440, vaddr 0x10440)
+#:default_file ; "kaem.run"
+    6B 61 65 6D 2E 72 75 6E 00
+#:prefix ; " +> "
+    20 2B 3E 20 00
+#:hard ; "Subprocess error\nABORTING HARD\n"
+    53 75 62 70 72 6F 63 65 73 73 20 65 72 72 6F 72 0A 41 42 4F 52 54 49 4E 47 20 48 41 52 44 0A 00
+#:script
+    00000000
+#:tokens
+    00000000
+#:command_done
+    00000000
+#:max_args
+    00040000  # 256 * sizeof(char*)
+#:max_string
+    00100000  # 4096 * sizeof(char)
+#:MALLOC
+    00000000
+#:status
+    00000000

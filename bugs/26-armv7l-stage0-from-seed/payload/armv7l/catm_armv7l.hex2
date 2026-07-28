@@ -1,0 +1,127 @@
+## Copyright (C) 2020 Jeremiah Orians
+## Copyright (C) 2026 Jason Gross
+## This file is part of stage0.
+##
+## stage0 is free software: you can redistribute it and/or modify
+## it under the terms of the GNU General Public License as published by
+## the Free Software Foundation, either version 3 of the License, or
+## (at your option) any later version.
+##
+## stage0 is distributed in the hope that it will be useful,
+## but WITHOUT ANY WARRANTY; without even the implied warranty of
+## MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+## GNU General Public License for more details.
+##
+## You should have received a copy of the GNU General Public License
+## along with stage0.  If not, see <http://www.gnu.org/licenses/>.
+
+## catm_armv7l: concatenate files (catm output in1 ... inN), transcribed
+## from x86/catm_x86.S semantics; see GAS/catm_armv7l.S for the reference.
+## Written in the hex2 LANGUAGE (this file is processed by hex2-0), using
+## the M2libc ELF-armv7l.hex2 header idiom: the linker computes the entry
+## point, program-header offset and file size from the labels below.
+
+## ELF Header
+
+:ELF_base
+7F 45 4C 46                    ## e_ident[EI_MAG0-3] ELF's magic number
+
+01                             ## e_ident[EI_CLASS] Indicating 32 bit
+01                             ## e_ident[EI_DATA] Indicating little endianness
+01                             ## e_ident[EI_VERSION] Indicating original elf
+
+03                             ## e_ident[EI_OSABI] Set at 3 because FreeBSD is strict
+00                             ## e_ident[EI_ABIVERSION] See above
+
+00 00 00 00 00 00 00           ## e_ident[EI_PAD]
+
+02 00                          ## e_type Indicating Executable
+28 00                          ## e_machine Indicating 32bit ARM
+01 00 00 00                    ## e_version Indicating original elf
+
+&_start                        ## e_entry Address of the entry point
+%ELF_program_headers>ELF_base  ## e_phoff Address of program header table
+00 00 00 00                    ## e_shoff Address of section header table
+
+00 02 00 05                    ## e_flags (EABI version 5, soft-float)
+
+34 00                          ## e_ehsize Indicating our 52 Byte header
+
+20 00                          ## e_phentsize size of a program header table
+01 00                          ## e_phnum number of entries in program table
+
+00 00                          ## e_shentsize size of a section header table
+00 00                          ## e_shnum number of entries in section table
+
+00 00                          ## e_shstrndx index of the section names
+
+## Program Header
+
+:ELF_program_headers
+01 00 00 00                    ## p_type PT-LOAD = 1
+00 00 00 00                    ## p_offset
+
+&ELF_base                      ## p_vaddr
+&ELF_base                      ## p_physaddr
+
+%ELF_end>ELF_base              ## p_filesz
+%ELF_end>ELF_base              ## p_memsz
+
+07 00 00 00                    ## p_flags PF-X|PF-W|PF-R = 7
+00 00 01 00                    ## p_alignment
+
+:ELF_text
+    ## Where the ELF Header is going to hit
+    ## Simply jump to _start
+    ## Our main function
+
+:_start
+    04009DE4    ; pop {r0}    # Get the number of arguments
+    04009DE4    ; pop {r0}    # Get the program name
+    04009DE4    ; pop {r0}    # Get the actual output name
+    411200E3    ; movw r1, #577    # Prepare file as O_WRONLY|O_CREAT|O_TRUNC
+    062DA0E3    ; mov r2, #384    # Prepare file as RW for owner only (600 in octal)
+    0570A0E3    ; mov r7, #5    # the syscall number for open()
+    000000EF    ; svc #0    # Now open that file
+    0090A0E1    ; mov r9, r0    # Preserve the file pointer we were given
+    0000A0E3    ; mov r0, #0    # Get current brk
+    2D70A0E3    ; mov r7, #45    # the Syscall # for SYS_BRK
+    000000EF    ; svc #0    # Let the kernel do the work
+    00B0A0E1    ; mov r11, r0    # Set our malloc pointer
+    010680E2    ; add r0, #0x100000    # Allocate 1MB
+    2D70A0E3    ; mov r7, #45    # the Syscall # for SYS_BRK
+    000000EF    ; svc #0    # Let the kernel do the work
+
+:core
+    04009DE4    ; pop {r0}    # Get the actual input name
+    000050E3    ; cmp r0, #0    # Check for null string
+    1200000A    ; beq done    # Hit null be done
+    0010A0E3    ; mov r1, #0    # prepare read_only
+    0020A0E3    ; mov r2, #0    # prevent any interactions
+    0570A0E3    ; mov r7, #5    # the syscall number for open()
+    000000EF    ; svc #0    # Now open that damn file
+    00A0A0E1    ; mov r10, r0    # Protect INPUT
+
+:keep
+    0126A0E3    ; mov r2, #0x100000    # set the size of chars we want
+    0B10A0E1    ; mov r1, r11    # Where to put it
+    0A00A0E1    ; mov r0, r10    # Where are we reading from
+    0370A0E3    ; mov r7, #3    # the syscall number for read
+    000000EF    ; svc #0    # call the Kernel
+    0030A0E1    ; mov r3, r0    # Protect the number of bytes read
+    0020A0E1    ; mov r2, r0    # Number of bytes to write
+    0B10A0E1    ; mov r1, r11    # What we are writing
+    0900A0E1    ; mov r0, r9    # Write to target file
+    0470A0E3    ; mov r7, #4    # the syscall number for write
+    000000EF    ; svc #0    # call the Kernel
+    010653E3    ; cmp r3, #0x100000    # Check if buffer was fully used
+    F2FFFF0A    ; beq keep    # Keep looping if was full
+    E9FFFFEA    ; b core    # Otherwise move to next file
+
+:done
+    ## program completed Successfully
+    0000A0E3    ; mov r0, #0    # All is well
+    0170A0E3    ; mov r7, #1    # put the exit syscall number in r7
+    000000EF    ; svc #0    # Call it a good day
+
+:ELF_end
