@@ -1,0 +1,23 @@
+name: m2libc-armv7l-unlink-arg
+# GREEN == the bug REPRODUCES: M2libc's armv7l unlink() passes the kernel
+# &filename instead of filename (its wrapper is missing the
+# "!0 R0 LOAD32 R0 MEMORY" dereference its char* siblings carry).  A real C
+# program built through the M2-Planet -> M1 -> hex2 chain against pinned M2libc
+# cannot delete a file under qemu-arm while access() on the same path finds it;
+# the identical amd64 build deletes it; adding the one missing line fixes armv7l.
+# PART A re-reads live M2libc HEAD so a silent upstream fix goes red.
+on:
+  push:
+  workflow_dispatch:
+jobs:
+  reproduce:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install gcc + qemu-user (armv7l runtime) + git
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q gcc git qemu-user-static
+      - name: Reproduce (armv7l unlink fails + file survives; amd64 removes; 1-line fix works)
+        run: bash bugs/25-m2libc-armv7l-unlink-arg/run.sh

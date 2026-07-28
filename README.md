@@ -56,6 +56,7 @@ workflow file).
 | 22 | [`builder-hex0-riscv64-unified-seed`](bugs/22-builder-hex0-riscv64-unified-seed/) | [![builder-hex0-riscv64-unified-seed](../../actions/workflows/builder-hex0-riscv64-unified-seed.yml/badge.svg)](../../actions/workflows/builder-hex0-riscv64-unified-seed.yml) | **Not a bug** — the UNIFIED-seed sibling of the row 15 demonstration; contribution offer to [builder-hex0](https://github.com/ironmeld/builder-hex0) | one probing seed for both machines (`JasonGross/builder-hex0` branch `riscv64-probing-seed-capabilities`) |
 | 23 | [`mes-abtod-negative-exponent`](bugs/23-mes-abtod-negative-exponent/) | [![mes-abtod-negative-exponent](../../actions/workflows/mes-abtod-negative-exponent.yml/badge.svg)](../../actions/workflows/mes-abtod-negative-exponent.yml) | GNU Mes (`bug-mes@gnu.org`); context for the riscv64 bootstrap chain ([codeberg.org/ekaitz-zarraga/commencement.scm](https://codeberg.org/ekaitz-zarraga/commencement.scm)) -- completes the mes-abtod story of rows 1/2 | riscv64 flex/log10 root cause (branch `flex-tcc-rootcause`, `data/riscv64-flex-log10/`) |
 | 24 | [`fiwix-syscall-off-by-one`](bugs/24-fiwix-syscall-off-by-one/) | [![fiwix-syscall-off-by-one](../../actions/workflows/fiwix-syscall-off-by-one.yml/badge.svg)](../../actions/workflows/fiwix-syscall-off-by-one.yml) | Fiwix (Mikel Izal; [github.com/mikaku/Fiwix](https://github.com/mikaku/Fiwix)) — separate from the LP64 count fix (bug 7); report pending | the `num > NR_SYSCALLS` off-by-one deliberately left out of reproducer 7's count fix — a correct-count kernel still admits `num == NR_SYSCALLS` and dispatches one past the syscall table |
+| 25 | [`m2libc-armv7l-unlink-arg`](bugs/25-m2libc-armv7l-unlink-arg/) | [![m2libc-armv7l-unlink-arg](../../actions/workflows/m2libc-armv7l-unlink-arg.yml/badge.svg)](../../actions/workflows/m2libc-armv7l-unlink-arg.yml) | M2libc (Jeremiah Orians; [github.com/oriansj/M2libc](https://github.com/oriansj/M2libc)) | native armv7l stage0 ladder (`scripts/s7-gate.sh`, branch `stage0-armv7l`) — a chain-built `rm` cannot delete |
 
 
 ### 1. `mes-ldexp-stub` — GNU Mes' ldexp is a `return 0;` stub
@@ -576,6 +577,34 @@ evidence in the bootstrap project, branch `flex-tcc-rootcause`; this
 workflow demonstrates the mes defect and the arithmetic bridge from public
 sources only.)
 
+### 25. `m2libc-armv7l-unlink-arg` — M2libc's armv7l `unlink()` passes the kernel `&filename` instead of `filename`
+
+In `M2libc/armv7l/linux/unistd.c` every syscall wrapper fetches a stack-passed
+argument with a two-line idiom: `!4 R0 SUB R12 ARITH_ALWAYS` puts the *address*
+of the argument slot in `R0`, then `!0 R0 LOAD32 R0 MEMORY` loads the *value*
+from it. `unlink()` has the first line but not the second, so it hands the
+kernel the address of the pointer rather than the pointer. The kernel reads a
+bogus path, `unlink` returns nonzero (ENOENT), and the file is never removed —
+in the native armv7l stage0 ladder a chain-built `rm` silently cannot delete.
+The defect is armv7l-only: the char\* siblings `access()`/`chdir()`/`symlink()`
+in the same file all carry the `LOAD32`, and every other backend dereferences
+too (x86/amd64/riscv32/riscv64 load the value; aarch64 receives its argument in
+a register and needs no load).
+
+The workflow builds a real C program through the actual `M2-Planet → M1 → hex2`
+chain (all three gcc-built from pinned upstream sources) against pinned M2libc.
+The program calls `access()` and `unlink()` on the same path. Under
+`qemu-arm`, `access()` finds the file (its pointer is dereferenced correctly)
+but `unlink()` fails and the file **survives** (exit 2). The **identical
+program built for amd64** and run natively **removes** the file (exit 0) — the
+control that isolates the defect to the missing armv7l dereference rather than
+the program. Finally the fix leg inserts the single missing
+`!0 R0 LOAD32 R0 MEMORY` line into `unlink()` — and nothing else, asserted by a
+one-site count — rebuilds for armv7l, and the file is then removed. PART A
+re-reads the live M2libc default branch on every run and fails loudly if
+`unlink()` grows the dereference (or a sibling loses it), so a silent upstream
+fix surfaces as a red rather than a stale green.
+
 ## Pinned sources
 
 | Source | Pin |
@@ -599,6 +628,7 @@ sources only.)
 | r6rs-compression | git.ngyro.com/r6rs-compression @ `a2d01f24d5ad703ed2742b97053d19dcd42f89b1` (the commit bootar v1b pins) |
 | struct-pack / hashing | gitlab.com/weinholt @ `11b71963…239ee` / `eb280801…ef0cb` (likewise bootar's pins) |
 | musl | `musl-1.1.24.tar.gz` from musl.libc.org, sha256 `1370c9a8…022a3` |
+| M2libc / M2-Planet / mescc-tools (armv7l `unlink`) | github.com/oriansj, pinned: `M2libc b7e5d1cb`, `M2-Planet 34fbd5c2`, `mescc-tools d59464d2` |
 
 ---
 
