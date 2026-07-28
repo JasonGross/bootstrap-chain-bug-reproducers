@@ -1,9 +1,8 @@
 # bootstrap-chain-bug-reproducers
 
-Self-contained CI reproducers for upstream-reportable bugs found by the
-[nix-bootstrapping](https://github.com/JasonGross) full-source-bootstrap
-measurement project while driving the hex0 → Mes/MesCC → tcc → musl → GCC
-chain on x86, ARM, and RISC-V.
+Self-contained CI reproducers for upstream-reportable bugs found by a
+full-source-bootstrap measurement project while driving the hex0 → Mes/MesCC →
+tcc → musl → GCC chain on x86, ARM, and RISC-V.
 
 **Staleness guard.** A pinned reproducer proves the bug existed at the pin; it
 cannot notice that upstream has since *fixed* it, so a report can quietly go
@@ -31,7 +30,7 @@ workflow file).
 
 ## The bugs
 
-| # | Bug | Status | Intended upstream | Local evidence in nix-bootstrapping |
+| # | Bug | Status | Intended upstream | Local evidence in the bootstrap project |
 |---|-----|--------|-------------------|--------------------------------------|
 | 1 | [`mes-ldexp-stub`](bugs/01-mes-ldexp-stub/) | [![mes-ldexp-stub](../../actions/workflows/mes-ldexp-stub.yml/badge.svg)](../../actions/workflows/mes-ldexp-stub.yml) | GNU Mes (`bug-mes@gnu.org`) | `data/mescc-bugs/bug17-musl-strtod-miscompile/` (`mes-ldexp-stub.c`) |
 | 2 | [`mes-abtod-fraction`](bugs/02-mes-abtod-fraction/) | [![mes-abtod-fraction](../../actions/workflows/mes-abtod-fraction.yml/badge.svg)](../../actions/workflows/mes-abtod-fraction.yml) | GNU Mes (`bug-mes@gnu.org`) | `data/mescc-bugs/bug18-mes-strtod-mantissa/` |
@@ -39,7 +38,7 @@ workflow file).
 | 4 | [`tcc-mes-arm-ldouble-zero`](bugs/04-tcc-mes-arm-ldouble-zero/) | [![tcc-mes-arm-ldouble-zero](../../actions/workflows/tcc-mes-arm-ldouble-zero.yml/badge.svg)](../../actions/workflows/tcc-mes-arm-ldouble-zero.yml) | janneke tinycc fork ([gitlab.com/janneke/tinycc](https://gitlab.com/janneke/tinycc)) | `data/mescc-bugs/bug20-tcc-arm-real-miscompile/` (+ `bug15-double-zero-materialization/`) |
 | 5 | [`tcc-fp-parse-libc-poison`](bugs/05-tcc-fp-parse-libc-poison/) | [![tcc-fp-parse-libc-poison](../../actions/workflows/tcc-fp-parse-libc-poison.yml/badge.svg)](../../actions/workflows/tcc-fp-parse-libc-poison.yml) | janneke tinycc fork (context for an integer-only FP-literal parser) | `data/mescc-bugs/bug17-musl-strtod-miscompile/` |
 | 6 | [`gash-exit-success-gate`](bugs/06-gash-exit-success-gate/) | [![gash-exit-success-gate](../../actions/workflows/gash-exit-success-gate.yml/badge.svg)](../../actions/workflows/gash-exit-success-gate.yml) | Gash (Timothy Sample; `bug-gash@nongnu.org`), possibly also guix-devel | arm-commencement `gash-utils-boot-fixed` packaging (commencement.scm branch) |
-| 7 | [`fiwix-nr-buf-hash-lp64`](bugs/07-fiwix-nr-buf-hash-lp64/) | [![fiwix-nr-buf-hash-lp64](../../actions/workflows/fiwix-nr-buf-hash-lp64.yml/badge.svg)](../../actions/workflows/fiwix-nr-buf-hash-lp64.yml) | Fiwix (Mikel Izal; [github.com/mikaku/Fiwix](https://github.com/mikaku/Fiwix)) | fiwix-riscv64 port (draft PR #6, worktree `nix-bootstrapping-fiwix-rv64`) |
+| 7 | [`fiwix-nr-buf-hash-lp64`](bugs/07-fiwix-nr-buf-hash-lp64/) | [![fiwix-nr-buf-hash-lp64](../../actions/workflows/fiwix-nr-buf-hash-lp64.yml/badge.svg)](../../actions/workflows/fiwix-nr-buf-hash-lp64.yml) | Fiwix (Mikel Izal; [github.com/mikaku/Fiwix](https://github.com/mikaku/Fiwix)) | fiwix-riscv64 port (draft PR #6) |
 | 8 | [`tcc-riscv64-ldouble-cross`](bugs/08-tcc-riscv64-ldouble-cross/) | [![tcc-riscv64-ldouble-cross](../../actions/workflows/tcc-riscv64-ldouble-cross.yml/badge.svg)](../../actions/workflows/tcc-riscv64-ldouble-cross.yml) — **ALREADY REPORTED** | [codeberg.org/ekaitz-zarraga/tcc#1](https://codeberg.org/ekaitz-zarraga/tcc/issues/1); fixed upstream in tinycc mob `923fba83` ("general: long double issues") | riscv64 tcc/flex chain (`JasonGross/test-debugging-riscv64-tcc-flex`) |
 | 9 | [`mescc-riscv64-uint32-add`](bugs/09-mescc-riscv64-uint32-add/) | [![mescc-riscv64-uint32-add](../../actions/workflows/mescc-riscv64-uint32-add.yml/badge.svg)](../../actions/workflows/mescc-riscv64-uint32-add.yml) | GNU Mes (`bug-mes@gnu.org`) | tinyemu-retarget `scripts/tinyemu-riscv/drivers/qemu-user-ref/mescc-u32-repro/` (branch `tinyemu-riscv-mes-tcc`) |
 | 10 | [`tcc-mes-riscv64-fp-literal`](bugs/10-tcc-mes-riscv64-fp-literal/) | [![tcc-mes-riscv64-fp-literal](../../actions/workflows/tcc-mes-riscv64-fp-literal.yml/badge.svg)](../../actions/workflows/tcc-mes-riscv64-fp-literal.yml) | GNU Mes (`bug-mes@gnu.org`); context for the janneke tinycc fork (integer-only FP-literal parser, cf. bug 5) | riscv64 tcc-mes fixpoint forensics (branch `tinyemu-riscv-mes-tcc`, `qemu-user-ref/fixpoint-probes/`) |
@@ -123,7 +122,7 @@ hex-float literal parse with `d = ldexp(d, exp)` and parses decimal literals
 via `strtod`/`strtold` — i.e. **the values of the constants a tcc emits depend
 on the C library the running tcc binary links**. In a bootstrap the libc is
 *downstream* of the compiler, so a broken-FP libc self-propagates: in the
-nix-bootstrapping arm chain, the MesCC-built tcc links mes libc (bug 1's
+bootstrap's arm chain, the MesCC-built tcc links mes libc (bug 1's
 `return 0;` ldexp) → parses every `0x1pN` in musl's `floatscan.c`/`scalbn.c`
 as `0.0` while compiling musl → tcc-musl's runtime `strtod` is poisoned → the
 next compiler generation mis-parses *its own source constants* (gcc `real.c`'s
@@ -212,7 +211,7 @@ is mes libc's **own** `ceil()` (`lib/math/ceil.c`: `long i = number +
 0.9999;`): mes strtod parses `"0.9999"` as `0 + 9999/10` = **exactly 999.9**
 (`0x408F3F3333333333`), bit-identical to its parse of `"999.9"` — two
 different source constants collapse to the same double — instead of
-`0x3FEFFF2E48E8A71E`. In the nix-bootstrapping riscv64 fixpoint forensics
+`0x3FEFFF2E48E8A71E`. In the riscv64 fixpoint forensics
 this is visible in-chain: the **entire binary delta** between the MesCC-built
 tcc-mes and its self-rebuilt successor is that one 8-byte `ceil()` constant
 (the MesCC-built generation emits garbage bits for it; the tcc-rebuilt one
@@ -224,8 +223,7 @@ MesCC on host Guile, riscv64 target): a function-local `double d = 0.9999;`
 is emitted as the *integer* immediate `!0.9999 addi`, and a file-scope one is
 a hard `init->data: not supported` error — no stage upstream of tcc-musl can
 even materialize the IEEE constant. (The full in-chain gen2/gen3 exhibit
-needs the whole mes/tcc riscv64 chain and is not run in CI; see the
-nix-bootstrapping `tinyemu-riscv-mes-tcc` fixpoint forensics for it.)
+needs the whole mes/tcc riscv64 chain and is not run in CI.)
 
 ### 11. `gash-utils-find-expressions` — gash-utils' `find` supports no expression predicates, and the empty output silently guts libtool archives
 
@@ -245,7 +243,7 @@ convenience archive is silently empty. The workflow runs the minimal case,
 shows `-print` failing identically, shows bare `find` working, then runs the
 verbatim libtool gather into a real `ar rc`: 0 members / 8 bytes with
 gash-utils find versus 2 members / 128 bytes with GNU find as control. In
-the nix-bootstrapping arm ladder the same mechanism produced a `libstdc++.a`
+the arm bootstrap ladder the same mechanism produced a `libstdc++.a`
 with 8 members (~67 KB) instead of 124, and nothing failed until the first
 C++ link much later. Same silent-degradation class as bug 6.
 
@@ -311,7 +309,7 @@ per dropped zero. `1.0625` renders as `"1.625"` (10× off), `3.0009` as
 zeros are then stripped, so `2.00000001` renders as `"2"`, losing the
 fraction entirely. This is the exact mirror of bug 2 (`abtod`, the *input*
 side): both lose the position of the decimal point. It matters because
-build-time **generators** print floats: in the nix-bootstrapping arm ladder
+build-time **generators** print floats: in the arm bootstrap ladder
 the same class of defect (there through the boot musl rather than mes) made
 GMP's `gen-psqr` write a **2.4 GB** `mpn/perfsqr.h` whose header comment read
 `0+00%` instead of `82.81%`, failing the build with "perfsqr.h is too large".
@@ -486,7 +484,7 @@ must go red on the enable register (ablation recorded in the `run.sh` header,
 [`bugs/19-tinyemu-plic-not-enable-gated/`](bugs/19-tinyemu-plic-not-enable-gated/).
 
 TinyEMU has no tracker; the intended route is email to Fabrice Bellard. The
-report this backs is the manufactured Linux 6.1 boot hang (nix-bootstrapping
+report this backs is the manufactured Linux 6.1 boot hang (the bootstrap's
 fiwix-riscv64 / tinyemu-retarget Gate P).
 
 ### 20. `tcc-fp-literal-integer-parser` — the patch-verifying leg for tinycc patch 0013 (the integer-only IEEE-754 literal parser)
@@ -574,7 +572,7 @@ with the mes parser swapped for the correct one, exactly the six buggy-value
 predictions must fail — proving the harness notices the bug's absence.
 (The chain-side consequence — the identical bit patterns in the riscv64
 chain's compiled `musl-boot0` `log10.o` and its flex failing — is internal
-evidence in the nix-bootstrapping project, branch `flex-tcc-rootcause`; this
+evidence in the bootstrap project, branch `flex-tcc-rootcause`; this
 workflow demonstrates the mes defect and the arithmetic bridge from public
 sources only.)
 

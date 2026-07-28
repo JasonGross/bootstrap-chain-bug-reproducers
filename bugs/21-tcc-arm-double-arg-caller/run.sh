@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# tcc-arm-double-arg-caller (board row 5): the patch-verifying leg for tinycc
+# tcc-arm-double-arg-caller (bug 21 in this repository's README): the patch-verifying leg for tinycc
 # patch 0014 (bug19 -- the softfp double-argument caller regression).
 #
 # bug19 is NOT an upstream tcc bug: it is a regression introduced by OUR OWN

@@ -14,7 +14,7 @@
    i.e. the two DIFFERENT literals collapse to the SAME double, and the value
    emitted for mes libc's own ceil() constant `0.9999` (lib/math/ceil.c) is
    exactly 999.9 -- the 8-byte constant observed in the self-rebuilt tcc-mes
-   generation in the nix-bootstrapping riscv64 fixpoint forensics.
+   generation in the riscv64 fixpoint forensics.
 
    Exit status: 0 iff the buggy values and the control values are all exactly
    as predicted, bit for bit.  */

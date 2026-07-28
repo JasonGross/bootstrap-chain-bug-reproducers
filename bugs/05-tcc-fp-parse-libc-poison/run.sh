@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# tcc-fp-parse-libc-poison (the mechanism behind nix-bootstrapping bug17):
+# tcc-fp-parse-libc-poison (the mechanism behind the bootstrap FP-poison bug):
 # tcc parses floating literals THROUGH THE C LIBRARY ITS OWN BINARY LINKS --
 # the hex-float path ends in `d = ldexp(d, exp)` (Bellard, 2001; still present)
 # and the decimal path calls strtod/strtold.  In a bootstrap, the libc is

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# tcc-mes-arm-ldouble-zero (nix-bootstrapping bug20): the janneke tinycc fork's
+# tcc-mes-arm-ldouble-zero: the janneke tinycc fork's
 # `#if defined BOOTSTRAP && defined __arm__` VT_LDOUBLE branch of init_putv is
 # an EMPTY block, so on ARM EABI (long double == double) EVERY long double
 # constant materializes as 0.0.

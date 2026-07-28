@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# tcc-fp-literal-integer-parser (board row 4): the patch-verifying leg for
+# tcc-fp-literal-integer-parser (bug 20 in this repository's README): the patch-verifying leg for
 # tinycc patch 0013 (the integer-only IEEE-754 literal parser).
 #
 # bugs/05-tcc-fp-parse-libc-poison shows the MECHANISM -- the janneke tinycc
