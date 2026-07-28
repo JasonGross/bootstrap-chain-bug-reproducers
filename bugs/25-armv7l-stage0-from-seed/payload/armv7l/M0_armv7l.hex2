@@ -1,0 +1,954 @@
+## Copyright (C) 2020 Jeremiah Orians
+## This file is part of stage0.
+##
+## stage0 is free software: you can redistribute it and/or modify
+## it under the terms of the GNU General Public License as published by
+## the Free Software Foundation, either version 3 of the License, or
+## (at your option) any later version.
+##
+## stage0 is distributed in the hope that it will be useful,
+## but WITHOUT ANY WARRANTY; without even the implied warranty of
+## MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+## GNU General Public License for more details.
+##
+## You should have received a copy of the GNU General Public License
+## along with stage0.  If not, see <http://www.gnu.org/licenses/>.
+
+## M0_armv7l: hand-assembled A32 rendering of stage0-posix-armv7l's
+## GAS/M0_x86.S reference (ARM code under an x86 filename), instruction for
+## instruction. M0 is the minimal macro assembler: 'DEFINE name value'
+## macros, token substitution, raw ('...') and hexified ("...") strings,
+## and immediates — %N emits 32-bit little-endian hex, @N emits 16-bit,
+## anything else 8-bit; decimal, 0x-hex and negative values accepted.
+## Usage: ./M0 <input.M1> <output.hex2>
+##
+## This file is written in the hex2 LANGUAGE and carries no ELF header of
+## its own: the ladder concatenates ELF-armv7l.hex2 (which ends at
+## :ELF_text) in front of it with catm, then links with hex2-0 — exactly
+## the x86 M0_x86.hex2 arrangement. The literal pool uses '&' absolutes
+## computed by the linker; the file ends with :ELF_end for the header's
+## size fields.
+
+## Where the ELF Header is going to hit
+## Simply jump to _start
+## Our main function
+    ## Register usage:
+    ## R0, R2, R1 => Temps
+    ## R5 => MALLOC
+    ## R6 => HEAD
+    ## [Output] => Output_file
+    ## [Input] => Input_file
+    ## Struct format: (size 32)
+    ## NEXT => 0
+    ## TYPE => 8
+    ## TEXT => 16
+    ## EXPRESSION => 24
+    ## Types
+    ## None => 0
+    ## MACRO => 1
+    ## STRING => 2
+    ## Where the ELF Header is going to hit
+    ## Simply jump to _start
+    ## Our main function
+
+:_start ; .text offset 0x0, vaddr 0x10054
+    04009DE4    ; pop {r0}    # Get the number of arguments
+    04009DE4    ; pop {r0}    # Get the program name
+    04009DE4    ; pop {r0}    # Get the actual input name
+    0010A0E3    ; mov r1, #0    # prepare read_only
+    0570A0E3    ; mov r7, #5    # the syscall number for open()
+    000000EF    ; svc #0    # Now open that damn file
+    2C899FE5    ; ldr r8, Input_address
+    000088E5    ; str r0, [r8]    # Preserve the file pointer we were given
+    04009DE4    ; pop {r0}    # Get the actual output name
+    411200E3    ; mov r1, #577    # Prepare file as O_WRONLY|O_CREAT|O_TRUNC
+    062DA0E3    ; mov r2, #384    # Prepare file as RW for owner only (600 in octal)
+    0570A0E3    ; mov r7, #5    # the syscall number for open()
+    000000EF    ; svc #0    # Now open that damn file
+    000050E3    ; cmp r0, #0    # Check for missing output
+    000000CA    ; bgt _start_out    # Have real input
+    0100A0E3    ; mov r0, #1    # Use stdout
+
+:_start_out ; .text offset 0x40, vaddr 0x10094
+    08899FE5    ; ldr r8, Output_address
+    000088E5    ; str r0, [r8]    # Preserve the file pointer we were given
+    2D70A0E3    ; mov r7, #45    # the Syscall # for SYS_BRK
+    0000A0E3    ; mov r0, #0    # Get current brk
+    000000EF    ; svc #0    # Let the kernel do the work
+    0050A0E1    ; mov r5, r0    # Set our malloc pointer
+    04E02DE5    ; push {r14}
+    0C0000EB    ; bl Tokenize_Line    # Get all lines
+    0600A0E1    ; mov r0, r6    # prepare for Reverse_List
+    A00000EB    ; bl Reverse_List    # Correct order
+    0060A0E1    ; mov r6, r0    # Update HEAD
+    AC0000EB    ; bl Identify_Macros    # Find the DEFINEs
+    E10000EB    ; bl Line_Macro    # Apply the DEFINEs
+    0D0100EB    ; bl Process_String    # Handle strings
+    470100EB    ; bl Eval_Immediates    # Handle Numbers
+    F00100EB    ; bl Preserve_Other    # Collect the remaining
+    000200EB    ; bl Print_Hex    # Output our results
+    04E09DE4    ; pop {r14}
+
+:Done ; .text offset 0x88, vaddr 0x100dc
+    ## program completed Successfully
+    0000A0E3    ; mov r0, #0    # All is well
+    0170A0E3    ; mov r7, #1    # put the exit syscall number in r7
+    000000EF    ; svc #0    # Call it a good day
+    ## Tokenize_Line Function
+    ## Using input file [Input] and Head R6
+    ## Creates a linked list of structs
+    ## Uses R1 for in_set strings, R2 for Int C and R3 for Struct Token* p
+
+:Tokenize_Line ; .text offset 0x94, vaddr 0x100e8
+    04102DE5    ; push {r1}    # Protect R1
+    04202DE5    ; push {r2}    # Protect R2
+    04302DE5    ; push {r3}    # Protect R3
+
+:restart ; .text offset 0xa0, vaddr 0x100f4
+    04E02DE5    ; push {r14}
+    240000EB    ; bl fgetc    # Read a char
+    04E09DE4    ; pop {r14}
+    040070E3    ; cmp r0, #-4    # Check for EOF
+    1D00000A    ; beq done    # File is collected
+    0020A0E1    ; mov r2, r0    # Protect C
+    891F8FE2    ; adr r1, comments    # Get pointer to "#;"
+    04E02DE5    ; push {r14}
+    750000EB    ; bl In_Set    # Check for comments
+    04E09DE4    ; pop {r14}
+    010050E3    ; cmp r0, #1    # If comments
+    3900000A    ; beq Purge_LineComment    # try again
+    0200A0E1    ; mov r0, r2    # put C in place for check
+    811F8FE2    ; adr r1, terminators    # Get pointer to "\n\t "
+    04E02DE5    ; push {r14}
+    6E0000EB    ; bl In_Set    # Check for terminators
+    04E09DE4    ; pop {r14}
+    010050E3    ; cmp r0, #1    # If terminator
+    ECFFFF0A    ; beq restart    # try again
+    2000A0E3    ; mov r0, #32    # Malloc the struct P
+    04E02DE5    ; push {r14}
+    220000EB    ; bl malloc    # Get pointer to P
+    0030A0E1    ; mov r3, r0    # Protect P
+    006083E5    ; str r6, [r3]    # P->NEXT = HEAD
+    0360A0E1    ; mov r6, r3    # HEAD = P
+    0200A0E1    ; mov r0, r2    # put C in place for check
+    761F8FE2    ; adr r1, string_char    # Get pointer to "\"'"
+    620000EB    ; bl In_Set    # Check for string chars
+    04E09DE4    ; pop {r14}
+    010050E3    ; cmp r0, #1    # If string char
+    2C00000A    ; beq Store_String    # Get string
+    04E02DE5    ; push {r14}
+    430000EB    ; bl Store_Atom    # Get whole token
+    04E09DE4    ; pop {r14}
+    DCFFFFEA    ; b restart
+
+:done ; .text offset 0x12c, vaddr 0x10180
+    04309DE4    ; pop {r3}    # Restore R3
+    04209DE4    ; pop {r2}    # Restore R2
+    04109DE4    ; pop {r1}    # Restore R1
+    1EFF2FE1    ; bx r14
+    ## fgetc function
+    ## Receives FILE* in [Input]
+    ## Returns -4 (EOF) or char in R0
+
+:fgetc ; .text offset 0x13c, vaddr 0x10190
+    04302DE5    ; push {r3}    # Protect R3
+    04202DE5    ; push {r2}    # Protect R2
+    04102DE5    ; push {r1}    # Protect R1
+    0300E0E3    ; mov r0, #-4    # Put EOF in r0
+    04002DE5    ; push {r0}    # Assume bad (If nothing read, value will remain EOF)
+    0D10A0E1    ; mov r1, r13    # Get stack address
+    F0879FE5    ; ldr r8, Input_address
+    000098E5    ; ldr r0, [r8]    # Where are we reading from
+    0370A0E3    ; mov r7, #3    # the syscall number for read
+    0120A0E3    ; mov r2, #1    # set the size of chars we want
+    000000EF    ; svc #0    # call the Kernel
+    04009DE4    ; pop {r0}    # Get either char or EOF
+    040070E3    ; cmp r0, #-4
+    FF000012    ; andne r0, #0xFF
+    04109DE4    ; pop {r1}    # Restore R1
+    04209DE4    ; pop {r2}    # Restore R2
+    04309DE4    ; pop {r3}    # Restore R3
+    1EFF2FE1    ; bx r14
+    ## Malloc isn't actually required if the program being built fits in the initial memory
+    ## However, it doesn't take much to add it.
+    ## Requires R5 to be initialized and R0 to have the number of desired bytes
+
+:malloc ; .text offset 0x184, vaddr 0x101d8
+    04302DE5    ; push {r3}    # Protect R3
+    04202DE5    ; push {r2}    # Protect R2
+    04102DE5    ; push {r1}    # Protect R1
+    0510A0E1    ; mov r1, r5    # Using the current pointer
+    050080E0    ; add r0, r5    # Request the number of desired bytes
+    2D70A0E3    ; mov r7, #45    # the Syscall # for SYS_BRK
+    000000EF    ; svc #0    # call the Kernel
+    0050A0E1    ; mov r5, r0    # Update pointer
+    0100A0E1    ; mov r0, r1    # Return pointer
+    04109DE4    ; pop {r1}    # Restore R1
+    04209DE4    ; pop {r2}    # Restore R2
+    04309DE4    ; pop {r3}    # Restore R3
+    1EFF2FE1    ; bx r14
+    ## Purge_LineComment function
+    ## Reads chars until LF and jumps to restart
+
+:Purge_LineComment ; .text offset 0x1b8, vaddr 0x1020c
+    04E02DE5    ; push {r14}
+    DEFFFFEB    ; bl fgetc    # Get a char
+    04E09DE4    ; pop {r14}
+    0A0050E3    ; cmp r0, #10    # While not LF
+    FAFFFF1A    ; bne Purge_LineComment    # Keep reading
+    B3FFFFEA    ; b restart
+    ## Store_String Function
+    ## Receives C in R2, HEAD in R3 and Input file in [Output]
+    ## Uses R1 for terminator, R2 for C and R3 for string
+
+:Store_String ; .text offset 0x1d0, vaddr 0x10224
+    04102DE5    ; push {r1}    # Protect R1
+    04202DE5    ; push {r2}    # Protect R2
+    04302DE5    ; push {r3}    # Protect R3
+    0200A0E3    ; mov r0, #2    # Using TYPE STRING
+    080083E5    ; str r0, [r3, #8]    # HEAD->TYPE = STRING
+    010CA0E3    ; mov r0, #256    # Malloc the string
+    04E02DE5    ; push {r14}
+    E4FFFFEB    ; bl malloc    # Get pointer to P
+    04E09DE4    ; pop {r14}
+    100083E5    ; str r0, [r3, #16]    # HEAD->TEXT = STRING
+    0210A0E1    ; mov r1, r2    # Protect terminator
+    0030A0E1    ; mov r3, r0    # Protect string pointer
+
+:Store_String_Loop ; .text offset 0x200, vaddr 0x10254
+    0020C3E5    ; strb r2, [r3]    # write byte
+    04E02DE5    ; push {r14}
+    CBFFFFEB    ; bl fgetc    # read next char
+    04E09DE4    ; pop {r14}
+    0020A0E1    ; mov r2, r0    # Update C
+    013083E2    ; add r3, #1    # STRING = STRING + 1
+    010052E1    ; cmp r2, r1    # See if we hit terminator
+    F7FFFF1A    ; bne Store_String_Loop    # Otherwise keep looping
+    04309DE4    ; pop {r3}    # Restore R3
+    04209DE4    ; pop {r2}    # Restore R2
+    04109DE4    ; pop {r1}    # Restore R1
+    0300A0E1    ; mov r0, r3    # return HEAD
+    9AFFFFEA    ; b restart
+    ## Store_Atom Function
+    ## Receives C in R2, HEAD in R3 and Input file in [Input]
+    ## Uses R1 for in_set strings, R2 for C and R3 for string
+
+:Store_Atom ; .text offset 0x234, vaddr 0x10288
+    04102DE5    ; push {r1}    # Protect R1
+    04202DE5    ; push {r2}    # Protect R2
+    04302DE5    ; push {r3}    # Protect R3
+    010CA0E3    ; mov r0, #256    # Malloc the string
+    04E02DE5    ; push {r14}
+    CDFFFFEB    ; bl malloc    # Get pointer to P
+    04E09DE4    ; pop {r14}
+    100083E5    ; str r0, [r3, #16]    # HEAD->TEXT = STRING
+    84108FE2    ; adr r1, terminators    # Get pointer to "\n\t "
+    0030A0E1    ; mov r3, r0    # Protect string pointer
+
+:Store_Atom_loop ; .text offset 0x25c, vaddr 0x102b0
+    0020C3E5    ; strb r2, [r3]    # write byte
+    04E02DE5    ; push {r14}
+    B4FFFFEB    ; bl fgetc    # read next char
+    04E09DE4    ; pop {r14}
+    0020A0E1    ; mov r2, r0    # Update C
+    013083E2    ; add r3, #1    # STRING = STRING + 1
+    04E02DE5    ; push {r14}
+    070000EB    ; bl In_Set    # Check for terminators
+    04E09DE4    ; pop {r14}
+    000050E3    ; cmp r0, #0    # Check for "\n\t "
+    F4FFFF0A    ; beq Store_Atom_loop    # Loop otherwise
+    04309DE4    ; pop {r3}    # Restore R3
+    04209DE4    ; pop {r2}    # Restore R2
+    04109DE4    ; pop {r1}    # Restore R1
+    0300A0E1    ; mov r0, r3    # return HEAD
+    1EFF2FE1    ; bx r14
+    ## In_Set function
+    ## Receives Char C in R0 and CHAR* in R1
+    ## Returns 1 if true, zero if false in R0
+
+:In_Set ; .text offset 0x29c, vaddr 0x102f0
+    04102DE5    ; push {r1}    # Protect R1
+    04202DE5    ; push {r2}    # Protect R2
+
+:In_Set_loop ; .text offset 0x2a4, vaddr 0x102f8
+    0020D1E5    ; ldrb r2, [r1]    # Read char
+    020050E1    ; cmp r0, r2    # See if they match
+    0300000A    ; beq In_Set_True    # return true
+    000052E3    ; cmp r2, #0    # Check for NULL
+    0500000A    ; beq In_Set_False    # return false
+    011081E2    ; add r1, #1    # s = s + 1
+    F8FFFFEA    ; b In_Set_loop    # Keep looping
+
+:In_Set_True ; .text offset 0x2c0, vaddr 0x10314
+    0100A0E3    ; mov r0, #1    # Set True
+    04209DE4    ; pop {r2}    # Restore R2
+    04109DE4    ; pop {r1}    # Restore R1
+    1EFF2FE1    ; bx r14
+
+:In_Set_False ; .text offset 0x2d0, vaddr 0x10324
+    0000A0E3    ; mov r0, #0    # Set FALSE
+    04209DE4    ; pop {r2}    # Restore R2
+    04109DE4    ; pop {r1}    # Restore R1
+    1EFF2FE1    ; bx r14
+    ## Char sets
+
+:terminators ; .text offset 0x2e0, vaddr 0x10334
+    0A 09 20 00    ; .byte 10, 9, 32, 0
+
+:comments ; .text offset 0x2e4, vaddr 0x10338
+    23 3B 00 00    ; .byte 35, 59, 0, 0
+
+:string_char ; .text offset 0x2e8, vaddr 0x1033c
+    22 27 00 00    ; .byte 34, 39, 0, 0
+    ## Reverse_List function
+    ## Receives List in R0
+    ## Returns the list reversed in R0
+
+:Reverse_List ; .text offset 0x2ec, vaddr 0x10340
+    04102DE5    ; push {r1}    # Protect R1
+    04202DE5    ; push {r2}    # Protect R2
+    0010A0E1    ; mov r1, r0    # Set HEAD
+    0000A0E3    ; mov r0, #0    # ROOT = NULL
+
+:Reverse_List_Loop ; .text offset 0x2fc, vaddr 0x10350
+    000051E3    ; cmp r1, #0    # WHILE HEAD != NULL
+    0400000A    ; beq Reverse_List_Done    # Stop otherwise
+    002091E5    ; ldr r2, [r1]    # NEXT = HEAD->NEXT
+    000081E5    ; str r0, [r1]    # HEAD->NEXT = ROOT
+    0100A0E1    ; mov r0, r1    # ROOT = HEAD
+    0210A0E1    ; mov r1, r2    # HEAD = NEXT
+    F8FFFFEA    ; b Reverse_List_Loop    # Keep Going
+
+:Reverse_List_Done ; .text offset 0x318, vaddr 0x1036c
+    04209DE4    ; pop {r2}    # Restore R2
+    04109DE4    ; pop {r1}    # Restore R1
+    1EFF2FE1    ; bx r14
+    ## Identify_Macros function
+    ## Receives List in R0
+    ## Updates the list in place; does not modify registers
+    ## Uses R1 for DEFINE, R2 for I
+
+:Identify_Macros ; .text offset 0x324, vaddr 0x10378
+    04002DE5    ; push {r0}    # Protect R0
+    04102DE5    ; push {r1}    # Protect R1
+    04202DE5    ; push {r2}    # Protect R2
+    04302DE5    ; push {r3}    # Protect R3
+    6C108FE2    ; adr r1, DEFINE_str    # Setup define string
+    0020A0E1    ; mov r2, r0    # I = HEAD
+
+:Identify_Macros_Loop ; .text offset 0x33c, vaddr 0x10390
+    100092E5    ; ldr r0, [r2, #16]    # I->TEXT
+    04E02DE5    ; push {r14}
+    190000EB    ; bl match    # IF "DEFINE" == I->TEXT
+    04E09DE4    ; pop {r14}
+    000050E3    ; cmp r0, #0    # Check if match
+    0C00001A    ; bne Identify_Macros_Next    # Skip the work
+    ## Deal with MACRO
+    0100A0E3    ; mov r0, #1    # Using MACRO
+    080082E5    ; str r0, [r2, #8]    # I->TYPE = MACRO
+    000092E5    ; ldr r0, [r2]    # I->NEXT
+    100090E5    ; ldr r0, [r0, #16]    # I->NEXT->TEXT
+    100082E5    ; str r0, [r2, #16]    # I->TEXT = I->NEXT->TEXT
+    000092E5    ; ldr r0, [r2]    # I->NEXT
+    000090E5    ; ldr r0, [r0]    # I->NEXT->NEXT
+    100090E5    ; ldr r0, [r0, #16]    # I->NEXT->NEXT->TEXT
+    180082E5    ; str r0, [r2, #24]    # I->EXPRESSION = I->NEXT->NEXT->TEXT
+    000092E5    ; ldr r0, [r2]    # I->NEXT
+    000090E5    ; ldr r0, [r0]    # I->NEXT->NEXT
+    000090E5    ; ldr r0, [r0]    # I->NEXT->NEXT->NEXT
+    000082E5    ; str r0, [r2]    # I->NEXT = I->NEXT->NEXT->NEXT
+
+:Identify_Macros_Next ; .text offset 0x388, vaddr 0x103dc
+    002092E5    ; ldr r2, [r2]    # I = I->NEXT
+    000052E3    ; cmp r2, #0    # Check for NULL
+    E9FFFF1A    ; bne Identify_Macros_Loop    # Keep looping otherwise
+    04309DE4    ; pop {r3}    # Restore R3
+    04209DE4    ; pop {r2}    # Restore R2
+    04109DE4    ; pop {r1}    # Restore R1
+    04009DE4    ; pop {r0}    # Restore R0
+    1EFF2FE1    ; bx r14
+
+:DEFINE_str ; .text offset 0x3a8, vaddr 0x103fc
+    44 45 46 49 4E 45 00 00    ; .byte 68, 69, 70, 73, 78, 69, 0, 0
+    ## match function
+    ## Receives CHAR* in R0 and CHAR* in R1
+    ## Returns 0 (TRUE) or 1 (FALSE) in R0
+
+:match ; .text offset 0x3b0, vaddr 0x10404
+    04102DE5    ; push {r1}    # Protect R1
+    04202DE5    ; push {r2}    # Protect R2
+    04302DE5    ; push {r3}    # Protect R3
+    0020A0E1    ; mov r2, r0    # S1 in place
+    0130A0E1    ; mov r3, r1    # S2 in place
+
+:match_Loop ; .text offset 0x3c4, vaddr 0x10418
+    0000D2E5    ; ldrb r0, [r2]    # S1[0]
+    0010D3E5    ; ldrb r1, [r3]    # S2[0]
+    010050E1    ; cmp r0, r1    # See if they match
+    0400001A    ; bne match_False    # If not
+    012082E2    ; add r2, #1    # S1 = S1 + 1
+    013083E2    ; add r3, #1    # S2 = S2 + 1
+    000050E3    ; cmp r0, #0    # If reached end of string
+    0100000A    ; beq match_Done    # Perfect match
+    F6FFFFEA    ; b match_Loop    # Otherwise keep looping
+
+:match_False ; .text offset 0x3e8, vaddr 0x1043c
+    0100A0E3    ; mov r0, #1    # Return false
+
+:match_Done ; .text offset 0x3ec, vaddr 0x10440
+    04309DE4    ; pop {r3}    # Restore R3
+    04209DE4    ; pop {r2}    # Restore R2
+    04109DE4    ; pop {r1}    # Restore R1
+    1EFF2FE1    ; bx r14
+    ## Line_Macro function
+    ## Receives List in R0
+    ## Updates the list in place; does not modify registers
+    ## Uses R0 for I, R1 for I->TEXT, R2 for I->EXPRESSION
+
+:Line_Macro ; .text offset 0x3fc, vaddr 0x10450
+    04002DE5    ; push {r0}    # Protect R0
+    04102DE5    ; push {r1}    # Protect R1
+    04202DE5    ; push {r2}    # Protect R2
+    04302DE5    ; push {r3}    # Protect R3
+
+:Line_Macro_Loop ; .text offset 0x40c, vaddr 0x10460
+    081090E5    ; ldr r1, [r0, #8]    # I->TYPE
+    010051E3    ; cmp r1, #1    # IF MACRO == I->TYPE
+    0600001A    ; bne Line_Macro_Next    # Otherwise move on
+    ## Is a macro apply
+    101090E5    ; ldr r1, [r0, #16]    # I->TEXT
+    182090E5    ; ldr r2, [r0, #24]    # I->EXPRESSION
+    000090E5    ; ldr r0, [r0]    # I->NEXT
+    04E02DE5    ; push {r14}
+    090000EB    ; bl Set_Expression    # Apply it
+    04E09DE4    ; pop {r14}
+    F5FFFFEA    ; b Line_Macro_Loop    # Move on to next
+
+:Line_Macro_Next ; .text offset 0x434, vaddr 0x10488
+    000090E5    ; ldr r0, [r0]    # I->NEXT
+    000050E3    ; cmp r0, #0    # Check for NULL
+    F2FFFF1A    ; bne Line_Macro_Loop    # Keep going
+    04309DE4    ; pop {r3}    # Restore R3
+    04209DE4    ; pop {r2}    # Restore R2
+    04109DE4    ; pop {r1}    # Restore R1
+    04009DE4    ; pop {r0}    # Restore R0
+    1EFF2FE1    ; bx r14
+    ## Set_Expression function
+    ## Receives List in R0, CHAR* in R1 and CHAR* in R2
+    ## Updates the list in place; does not modify registers
+    ## Uses R1 for C, R2 for EXP and R3 for I
+
+:Set_Expression ; .text offset 0x454, vaddr 0x104a8
+    04002DE5    ; push {r0}    # Protect R0
+    04102DE5    ; push {r1}    # Protect R1
+    04202DE5    ; push {r2}    # Protect R2
+    04302DE5    ; push {r3}    # Protect R3
+    0030A0E1    ; mov r3, r0    # Set I
+
+:Set_Expression_Loop ; .text offset 0x468, vaddr 0x104bc
+    080093E5    ; ldr r0, [r3, #8]    # I->TYPE
+    010050E3    ; cmp r0, #1    # IF MACRO == I->TYPE
+    0600000A    ; beq Set_Expression_Next    # Ignore and move on
+    100093E5    ; ldr r0, [r3, #16]    # I->TEXT
+    04E02DE5    ; push {r14}
+    CBFFFFEB    ; bl match    # Check for match
+    04E09DE4    ; pop {r14}
+    000050E3    ; cmp r0, #0    # If match
+    0000001A    ; bne Set_Expression_Next    # Otherwise next
+    ## We have a non-macro match
+    182083E5    ; str r2, [r3, #24]    # I->EXPRESSION = EXP
+
+:Set_Expression_Next ; .text offset 0x490, vaddr 0x104e4
+    003093E5    ; ldr r3, [r3]    # I = I->NEXT
+    000053E3    ; cmp r3, #0    # IF NULL == I
+    F2FFFF1A    ; bne Set_Expression_Loop    # Otherwise keep looping
+    04309DE4    ; pop {r3}    # Restore R3
+    04209DE4    ; pop {r2}    # Restore R2
+    04109DE4    ; pop {r1}    # Restore R1
+    04009DE4    ; pop {r0}    # Restore R0
+    1EFF2FE1    ; bx r14
+    ## Process_String function
+    ## Receives List in R0
+    ## Update the list in place; does not modify registers
+    ## Uses R1 for I->TEXT, R2 for I and R3 for S
+
+:Process_String ; .text offset 0x4b0, vaddr 0x10504
+    04002DE5    ; push {r0}    # Protect R0
+    04102DE5    ; push {r1}    # Protect R1
+    04202DE5    ; push {r2}    # Protect R2
+    04302DE5    ; push {r3}    # Protect R3
+    0020A0E1    ; mov r2, r0    # I = HEAD
+
+:Process_String_loop ; .text offset 0x4c4, vaddr 0x10518
+    080092E5    ; ldr r0, [r2, #8]    # I->TYPE
+    020050E3    ; cmp r0, #2    # IF STRING == I->TYPE
+    1D00001A    ; bne Process_String_Next    # Skip to next
+    101092E5    ; ldr r1, [r2, #16]    # I->TEXT
+    0000D1E5    ; ldrb r0, [r1]    # I->TEXT[0]
+    270050E3    ; cmp r0, #39    # IF '\'' == I->TEXT[0]
+    0200001A    ; bne Process_String_Raw    # Deal with '\"'
+    ## Deal with '\''
+    011081E2    ; add r1, #1    # I->TEXT + 1
+    181082E5    ; str r1, [r2, #24]    # I->EXPRESSION = I->TEXT + 1
+    160000EA    ; b Process_String_Next    # Move on to next
+
+:Process_String_Raw ; .text offset 0x4ec, vaddr 0x10540
+    0100A0E1    ; mov r0, r1    # Get length of I->TEXT
+    04E02DE5    ; push {r14}
+    1B0000EB    ; bl string_length    # Do it
+    4001A0E1    ; asr r0, #2    # LENGTH = LENGTH >> 2
+    010080E2    ; add r0, #1    # LENGTH = LENGTH + 1
+    8001A0E1    ; lsl r0, #3    # LENGTH = LENGTH << 3
+    1EFFFFEB    ; bl malloc    # Get string
+    04E09DE4    ; pop {r14}
+    0130A0E1    ; mov r3, r1    # S = I->TEXT
+    013083E2    ; add r3, #1    # S = S + 1
+    180082E5    ; str r0, [r2, #24]    # I->EXPRESSION = hexify
+    0010A0E1    ; mov r1, r0    # Put hexify buffer in r1
+
+:Process_String_Raw_Loop ; .text offset 0x51c, vaddr 0x10570
+    0000D3E5    ; ldrb r0, [r3]    # Read 1 chars
+    013083E2    ; add r3, #1    # S = S + 1
+    000050E3    ; cmp r0, #0    # Check for NULL
+    00800FE1    ; mrs r8, cpsr
+    04802DE5    ; push {r8}    # Protect condition
+    04E02DE5    ; push {r14}
+    B40000EB    ; bl hex8    # write them all
+    04E09DE4    ; pop {r14}
+    04809DE4    ; pop {r8}    # restore condition
+    08F029E1    ; msr cpsr, r8
+    F4FFFF1A    ; bne Process_String_Raw_Loop    # Keep looping
+
+:Process_String_Next ; .text offset 0x548, vaddr 0x1059c
+    002092E5    ; ldr r2, [r2]    # I = I->NEXT
+    000052E3    ; cmp r2, #0    # IF NULL == I
+    DBFFFF1A    ; bne Process_String_loop    # Otherwise keep looping
+    04309DE4    ; pop {r3}    # Restore R3
+    04209DE4    ; pop {r2}    # Restore R2
+    04109DE4    ; pop {r1}    # Restore R1
+    04009DE4    ; pop {r0}    # Restore R0
+    1EFF2FE1    ; bx r14
+    ## string_length function
+    ## Receives CHAR* in R0
+    ## Returns INT in R0
+    ## Uses R0 for CH, R1 for S and R2 for INDEX
+
+:string_length ; .text offset 0x568, vaddr 0x105bc
+    04102DE5    ; push {r1}    # Protect R1
+    04202DE5    ; push {r2}    # Protect R2
+    0010A0E1    ; mov r1, r0    # Set S
+    0020A0E3    ; mov r2, #0    # INDEX = 0
+
+:string_length_loop ; .text offset 0x578, vaddr 0x105cc
+    0200D1E7    ; ldrb r0, [r1, r2]    # S[0]
+    000050E3    ; cmp r0, #0    # IF NULL == S[0]
+    0100000A    ; beq string_length_done    # Stop
+    012082E2    ; add r2, #1    # INDEX = INDEX + 1
+    FAFFFFEA    ; b string_length_loop    # Keep going
+
+:string_length_done ; .text offset 0x58c, vaddr 0x105e0
+    0200A0E1    ; mov r0, r2    # RETURN INDEX
+    04209DE4    ; pop {r2}    # Restore R2
+    04109DE4    ; pop {r1}    # Restore R1
+    1EFF2FE1    ; bx r14
+    ## Eval_Immediates function
+    ## Receives List in R0
+    ## Updates the list in place; does not modify registers
+    ## Uses R1 for I->TEXT[0], R2 for I->TEXT[1] and R3 for I
+
+:Eval_Immediates ; .text offset 0x59c, vaddr 0x105f0
+    04002DE5    ; push {r0}    # Protect R0
+    04102DE5    ; push {r1}    # Protect R1
+    04202DE5    ; push {r2}    # Protect R2
+    04302DE5    ; push {r3}    # Protect R3
+    0030A0E1    ; mov r3, r0    # I = HEAD
+
+:Eval_Immediates_Loop ; .text offset 0x5b0, vaddr 0x10604
+    ## Check for MACRO
+    080093E5    ; ldr r0, [r3, #8]    # I->TYPE
+    010050E3    ; cmp r0, #1    # IF MACRO == I-TYPE
+    1100000A    ; beq Eval_Immediates_Next    # Skip to next
+    ## Check for NULL EXPRESSION
+    180093E5    ; ldr r0, [r3, #24]    # I->EXPRESSION
+    000050E3    ; cmp r0, #0    # IF NULL == I->EXPRESSION
+    0E00001A    ; bne Eval_Immediates_Next    # Skip to next
+    ## Check if number
+    100093E5    ; ldr r0, [r3, #16]    # I->TEXT
+    0010D0E5    ; ldrb r1, [r0]    # I->TEXT[0]
+    010080E2    ; add r0, #1    # I->TEXT + 1
+    0020D0E5    ; ldrb r2, [r0]    # I->TEXT[1]
+    04E02DE5    ; push {r14}
+    100000EB    ; bl numerate_string    # Convert string to INT
+    04E09DE4    ; pop {r14}
+    000050E3    ; cmp r0, #0    # IF 0 == numerate_number(I->TEXT + 1)
+    0100001A    ; bne Eval_Immediates_value    # Has a value
+    ## Last chance for Immediate
+    300052E3    ; cmp r2, #48    # If '0' == I->TEXT[1]
+    0300001A    ; bne Eval_Immediates_Next    # Skip to next
+
+:Eval_Immediates_value ; .text offset 0x5f4, vaddr 0x10648
+    04E02DE5    ; push {r14}
+    400000EB    ; bl express_number    # Convert value to hex string
+    04E09DE4    ; pop {r14}
+    180083E5    ; str r0, [r3, #24]    # I->EXPRESSION = express_number(value, I-TEXT[0])
+
+:Eval_Immediates_Next ; .text offset 0x604, vaddr 0x10658
+    003093E5    ; ldr r3, [r3]    # I = I->NEXT
+    000053E3    ; cmp r3, #0    # IF NULL == I
+    E7FFFF1A    ; bne Eval_Immediates_Loop    # Otherwise keep looping
+    04309DE4    ; pop {r3}    # Restore R3
+    04209DE4    ; pop {r2}    # Restore R2
+    04109DE4    ; pop {r1}    # Restore R1
+    04009DE4    ; pop {r0}    # Restore R0
+    1EFF2FE1    ; bx r14
+    ## numerate_string function
+    ## Receives CHAR* in R0
+    ## Returns value of CHAR* in R0
+    ## Uses R0 for VALUE, R1 for S, R2 for CH and R5 for NEGATIVE?
+
+:numerate_string ; .text offset 0x624, vaddr 0x10678
+    04102DE5    ; push {r1}    # Protect R1
+    04202DE5    ; push {r2}    # Protect R2
+    04302DE5    ; push {r3}    # Protect R3
+    04502DE5    ; push {r5}    # Protect R5
+    0010A0E1    ; mov r1, r0    # put S in correct place
+    0000A0E3    ; mov r0, #0    # Initialize to Zero
+
+:numerate_string_loop ; .text offset 0x63c, vaddr 0x10690
+    0120D1E5    ; ldrb r2, [r1, #1]    # S[1]
+    780052E3    ; cmp r2, #120    # IF 'x' == S[1]
+    1700000A    ; beq numerate_hex    # Deal with hex input
+    ## Assume decimal input
+    0020A0E3    ; mov r2, #0    # Assume no negation
+    0020D1E5    ; ldrb r2, [r1]    # S[0]
+    2D0052E3    ; cmp r2, #45    # IF '-' == S[0]
+    0100001A    ; bne numerate_decimal    # Skip negation
+    0150A0E3    ; mov r5, #1    # Set FLAG
+    011081E2    ; add r1, #1    # S = S + 1
+
+:numerate_decimal ; .text offset 0x660, vaddr 0x106b4
+    0020D1E5    ; ldrb r2, [r1]    # S[0]
+    000052E3    ; cmp r2, #0    # IF NULL == S[0]
+    0900000A    ; beq numerate_decimal_done    # We are done
+    0A80A0E3    ; mov r8, #10
+    900800E0    ; mul r0, r8    # VALUE = VALUE * 10
+    302042E2    ; sub r2, #48    # CH = CH - '0'
+    090052E3    ; cmp r2, #9    # Check for illegal
+    190000CA    ; bgt numerate_string_fail    # If CH > '9'
+    000052E3    ; cmp r2, #0    # Check for illegal
+    170000BA    ; blt numerate_string_fail    # IF CH < 0
+    020080E0    ; add r0, r2    # VALUE = VALUE + CH
+    011081E2    ; add r1, #1    # S = S + 1
+    F2FFFFEA    ; b numerate_decimal    # Keep looping
+
+:numerate_decimal_done ; .text offset 0x694, vaddr 0x106e8
+    010055E3    ; cmp r5, #1    # Check if need to negate
+    1300001A    ; bne numerate_string_done    # Nope
+    0080E0E3    ; mov r8, #-1
+    900800E0    ; mul r0, r8    # VALUE = VALUE * -1
+    100000EA    ; b numerate_string_done    # Done
+
+:numerate_hex ; .text offset 0x6a8, vaddr 0x106fc
+    021081E2    ; add r1, #2    # S = S + 2
+
+:numerate_hex_loop ; .text offset 0x6ac, vaddr 0x10700
+    0020D1E5    ; ldrb r2, [r1]    # S[0]
+    000052E3    ; cmp r2, #0    # IF NULL == S[0]
+    0C00000A    ; beq numerate_string_done    # We are done
+    0002A0E1    ; lsl r0, #4    # VALUE = VALUE << 4
+    302042E2    ; sub r2, #48    # CH = CH - '0'
+    0A0052E3    ; cmp r2, #10    # IF 10 >= CH
+    000000BA    ; blt numerate_hex_digit    # NO
+    072042E2    ; sub r2, #7    # Push A-F into range
+
+:numerate_hex_digit ; .text offset 0x6cc, vaddr 0x10720
+    0F0052E3    ; cmp r2, #15    # Check for illegal
+    040000CA    ; bgt numerate_string_fail    # If CH > 'F'
+    000052E3    ; cmp r2, #0    # Check for illegal
+    020000BA    ; blt numerate_string_fail    # IF CH < 0
+    020080E0    ; add r0, r2    # VALUE = VALUE + CH
+    011081E2    ; add r1, #1    # S = S + 1
+    F0FFFFEA    ; b numerate_hex_loop    # Keep looping
+
+:numerate_string_fail ; .text offset 0x6e8, vaddr 0x1073c
+    0000A0E3    ; mov r0, #0    # return ZERO
+
+:numerate_string_done ; .text offset 0x6ec, vaddr 0x10740
+    04509DE4    ; pop {r5}    # Restore R5
+    04309DE4    ; pop {r3}    # Restore R3
+    04209DE4    ; pop {r2}    # Restore R2
+    04109DE4    ; pop {r1}    # Restore R1
+    1EFF2FE1    ; bx r14
+    ## express_number function
+    ## Receives INT in R0 and CHAR in R1
+    ## Allocates a string and expresses the value in hex
+    ## Returns string in R0
+    ## Uses R0 for VALUE, R1 for S and R2 for CH
+
+:express_number ; .text offset 0x700, vaddr 0x10754
+    04102DE5    ; push {r1}    # Protect R1
+    04202DE5    ; push {r2}    # Protect R2
+    04302DE5    ; push {r3}    # Protect R3
+    0120A0E1    ; mov r2, r1    # Put CH in right place
+    0010A0E1    ; mov r1, r0    # Protect VALUE
+    250052E3    ; cmp r2, #37    # IF '%' == CH
+    0B00001A    ; bne express_number2    # Otherwise try @
+    0900A0E3    ; mov r0, #9    # We need 3bytes
+    04E02DE5    ; push {r14}
+    96FEFFEB    ; bl malloc    # Get S pointer
+    04E09DE4    ; pop {r14}
+    0080A0E1    ; mov r8, r0
+    0100A0E1    ; mov r0, r1    # Put S and VALUE in place
+    0810A0E1    ; mov r1, r8
+    04102DE5    ; push {r1}    # Protect S
+    04E02DE5    ; push {r14}
+    250000EB    ; bl hex32l    # Store 32bits
+    04E09DE4    ; pop {r14}
+    180000EA    ; b express_number_done    # done
+
+:express_number2 ; .text offset 0x74c, vaddr 0x107a0
+    400052E3    ; cmp r2, #64    # IF '@' == CH
+    ^~M0_tilde_check 1A    ; bne M0_tilde_check    # Otherwise try ~ then ! (armv7l '~' ext, appended at file end; same 4-byte slot as the original baked `bne express_number1`)
+    0500A0E3    ; mov r0, #5    # We need 3bytes
+    04E02DE5    ; push {r14}
+    88FEFFEB    ; bl malloc    # Get S pointer
+    04E09DE4    ; pop {r14}
+    0080A0E1    ; mov r8, r0
+    0100A0E1    ; mov r0, r1    # Put S and VALUE in place
+    0810A0E1    ; mov r1, r8
+    04102DE5    ; push {r1}    # Protect S
+    04E02DE5    ; push {r14}
+    1D0000EB    ; bl hex16l    # Store 16bits
+    04E09DE4    ; pop {r14}
+    0A0000EA    ; b express_number_done    # done
+
+:express_number1 ; .text offset 0x784, vaddr 0x107d8
+    0300A0E3    ; mov r0, #3    # We need 3bytes
+    04E02DE5    ; push {r14}
+    7CFEFFEB    ; bl malloc    # Get S pointer
+    04E09DE4    ; pop {r14}
+    0080A0E1    ; mov r8, r0
+    0100A0E1    ; mov r0, r1    # Put S and VALUE in place
+    0810A0E1    ; mov r1, r8
+    04102DE5    ; push {r1}    # Protect S
+    04E02DE5    ; push {r14}
+    170000EB    ; bl hex8    # Store 8bit
+    04E09DE4    ; pop {r14}
+
+:express_number_done ; .text offset 0x7b0, vaddr 0x10804
+    04009DE4    ; pop {r0}    # Restore S
+    04309DE4    ; pop {r3}    # Restore R3
+    04209DE4    ; pop {r2}    # Restore R2
+    04109DE4    ; pop {r1}    # Restore R1
+    1EFF2FE1    ; bx r14
+    ## HEX to ascii routine
+    ## Receives INT in R0 and CHAR* in R1
+    ## Stores ascii of INT in CHAR*
+    ## Returns only modifying R0
+
+:hex64l ; .text offset 0x7c4, vaddr 0x10818
+    04002DE5    ; push {r0}    # Protect top 32
+    04E02DE5    ; push {r14}
+    020000EB    ; bl hex32l    # Store it
+    04E09DE4    ; pop {r14}
+    04009DE4    ; pop {r0}    # do top 32
+    4000A0E1    ; asr r0, #32    # do bottom 32 first
+
+:hex32l ; .text offset 0x7dc, vaddr 0x10830
+    04002DE5    ; push {r0}    # Protect top 16
+    04E02DE5    ; push {r14}
+    020000EB    ; bl hex16l    # Store it
+    04E09DE4    ; pop {r14}
+    04009DE4    ; pop {r0}    # do top 16
+    4008A0E1    ; asr r0, #16    # do bottom 16 first
+
+:hex16l ; .text offset 0x7f4, vaddr 0x10848
+    04002DE5    ; push {r0}    # Protect top byte
+    04E02DE5    ; push {r14}
+    020000EB    ; bl hex8    # Store it
+    04E09DE4    ; pop {r14}
+    04009DE4    ; pop {r0}    # do high byte
+    4004A0E1    ; asr r0, #8    # do bottom byte first
+
+:hex8 ; .text offset 0x80c, vaddr 0x10860
+    04002DE5    ; push {r0}    # Protect bottom nibble
+    4002A0E1    ; asr r0, #4    # do high nibble first
+    04E02DE5    ; push {r14}
+    010000EB    ; bl hex4    # Store it
+    04E09DE4    ; pop {r14}
+    04009DE4    ; pop {r0}    # do low nibble
+
+:hex4 ; .text offset 0x824, vaddr 0x10878
+    0F0000E2    ; and r0, #0xf    # isolate nibble
+    300080E2    ; add r0, #'0'    # convert to ascii
+    390050E3    ; cmp r0, #'9'    # valid digit?
+    000000DA    ; ble hex1    # yes
+    070080E2    ; add r0, #7    # use alpha range
+
+:hex1 ; .text offset 0x838, vaddr 0x1088c
+    0000C1E5    ; strb r0, [r1]    # store result
+    011081E2    ; add r1, #1    # next position
+    1EFF2FE1    ; bx r14
+    ## Preserve_Other function
+    ## Receives List in R0
+    ## Updates the list in place; does not modify registers
+    ## Uses R0 for I, R1 for I->TEXT
+
+:Preserve_Other ; .text offset 0x844, vaddr 0x10898
+    04002DE5    ; push {r0}    # Protect R0
+    04102DE5    ; push {r1}    # Protect R1
+    04202DE5    ; push {r2}    # Protect R2
+    04302DE5    ; push {r3}    # Protect R3
+
+:Preserve_Other_Loop ; .text offset 0x854, vaddr 0x108a8
+    181090E5    ; ldr r1, [r0, #24]    # I->EXPRESSION
+    000051E3    ; cmp r1, #0    # IF NULL == I->EXPRESSION
+    0100001A    ; bne Preserve_Other_Next    # Otherwise next
+    ## Needs preserving
+    101090E5    ; ldr r1, [r0, #16]    # I->TEXT
+    181080E5    ; str r1, [r0, #24]    # I->EXPRESSION = I->TEXT
+
+:Preserve_Other_Next ; .text offset 0x868, vaddr 0x108bc
+    000090E5    ; ldr r0, [r0]    # I = I->NEXT
+    000050E3    ; cmp r0, #0    # IF NULL == I
+    F7FFFF1A    ; bne Preserve_Other_Loop    # Otherwise keep looping
+    04309DE4    ; pop {r3}    # Restore R3
+    04209DE4    ; pop {r2}    # Restore R2
+    04109DE4    ; pop {r1}    # Restore R1
+    04009DE4    ; pop {r0}    # Restore R0
+    1EFF2FE1    ; bx r14
+    ## Print_Hex function
+    ## Receives list in R0
+    ## walks the list and prints the I->EXPRESSION for all nodes followed by newline
+    ## Uses R1 for I
+
+:Print_Hex ; .text offset 0x888, vaddr 0x108dc
+    04102DE5    ; push {r1}    # Protect R1
+    04202DE5    ; push {r2}    # Protect R2
+    0610A0E1    ; mov r1, r6    # I = Head
+
+:Print_Hex_Loop ; .text offset 0x894, vaddr 0x108e8
+    080091E5    ; ldr r0, [r1, #8]    # I->TYPE
+    010050E3    ; cmp r0, #1    # IF MACRO == I->TYPE
+    0500000A    ; beq Print_Hex_Next    # Skip
+    180091E5    ; ldr r0, [r1 , #24]    # Using EXPRESSION
+    04E02DE5    ; push {r14}
+    080000EB    ; bl File_Print    # Print it
+    0A00A0E3    ; mov r0, #10    # NEWLINE
+    160000EB    ; bl fputc    # Append it
+    04E09DE4    ; pop {r14}
+
+:Print_Hex_Next ; .text offset 0x8b8, vaddr 0x1090c
+    001091E5    ; ldr r1, [r1]    # Iterate to next Token
+    000051E3    ; cmp r1, #0    # Check for NULL
+    F3FFFF1A    ; bne Print_Hex_Loop    # Otherwise keep looping
+    04209DE4    ; pop {r2}    # Restore R2
+    04109DE4    ; pop {r1}    # Restore R1
+    1EFF2FE1    ; bx r14
+    ## File_Print function
+    ## Receives CHAR* in R0
+    ## calls fputc for every non-null char
+
+:File_Print ; .text offset 0x8d0, vaddr 0x10924
+    04102DE5    ; push {r1}    # Protect R1
+    04202DE5    ; push {r2}    # Protect R2
+    0010A0E1    ; mov r1, r0    # Protect S
+    000050E3    ; cmp r0, #0    # Protect against nulls
+    0700000A    ; beq File_Print_Done    # Simply don't try to print them
+
+:File_Print_Loop ; .text offset 0x8e4, vaddr 0x10938
+    0000D1E5    ; ldrb r0, [r1]    # Read byte
+    000050E3    ; cmp r0, #0    # Check for NULL
+    0400000A    ; beq File_Print_Done    # Stop at NULL
+    04E02DE5    ; push {r14}
+    050000EB    ; bl fputc    # write it
+    04E09DE4    ; pop {r14}
+    011081E2    ; add r1, #1    # S = S + 1
+    F7FFFFEA    ; b File_Print_Loop    # Keep going
+
+:File_Print_Done ; .text offset 0x904, vaddr 0x10958
+    04209DE4    ; pop {r2}    # Restore R2
+    04109DE4    ; pop {r1}    # Restore R1
+    1EFF2FE1    ; bx r14
+    ## fputc function
+    ## receives CHAR in R0 and FILE* in [Output]
+    ## writes char and returns
+
+:fputc ; .text offset 0x910, vaddr 0x10964
+    04302DE5    ; push {r3}    # Protect R3
+    04202DE5    ; push {r2}    # protect R2
+    04102DE5    ; push {r1}    # protect R1
+    04002DE5    ; push {r0}    # We are writing r0
+    0D10A0E1    ; mov r1, r13    # Get stack address
+    24809FE5    ; ldr r8, Output_address
+    000098E5    ; ldr r0, [r8]    # Write to target file
+    0470A0E3    ; mov r7, #4    # the syscall number for write
+    0120A0E3    ; mov r2, #1    # set the size of chars we want
+    000000EF    ; svc #0    # call the Kernel
+    04009DE4    ; pop {r0}    # Restore stack
+    04109DE4    ; pop {r1}    # Restore R1
+    04209DE4    ; pop {r2}    # Restore R2
+    04309DE4    ; pop {r3}    # Restore R3
+    1EFF2FE1    ; bx r14
+    ## Because ARM doesn't support loading/storing directly to different segments in a single instruction
+
+:Input ; .text offset 0x94c, vaddr 0x109a0
+
+:Output ; .text offset 0x94c, vaddr 0x109a0
+
+## literal pool: absolute addresses of the data cells, computed by the
+## hex2 linker from the labels below — .text offset 0x94c, vaddr 0x109a0
+:Input_address
+    &Input    ; .word Input (== 0x109a8)
+:Output_address
+    &Output    ; .word Output (== 0x109ac)
+
+## data cells (vaddr 0x109a8); heap lives past the file on brk
+:Input
+    00000000
+:Output
+    00000000
+
+## ---------------------------------------------------------------------
+## armv7l '~' numeric-immediate extension (S6, 2026-07-27). The M2libc
+## armv7l M1 layer writes its skip-32-data idiom as `~0 JUMP_ALWAYS`
+## (3-byte imm24 + 1-byte cond EA = `b .+8`), so M0 must give '~' a
+## 24-bit width — M1-macro.c ARMV7L parity ('~' == 3 bytes, little-
+## endian).  The x86 reference M0 has no '~' (x86 M1 never uses it) and
+## upstream never ran an armv7l mini-kaem, so this width exists in no
+## upstream M0; without it `~0` numerates at 8 bits and every M2-Planet-
+## emitted global load loses 2 bytes (misaligned labels, dead branches).
+## Appended AFTER the data cells so no existing offset, literal-pool
+## displacement, or baked branch word moves; reached via the retargeted
+## bne in express_number2; branches here are symbolic ^~ (the S5a
+## hex2-0-armv7l aligned form), not baked words.
+
+:M0_tilde_check
+    7E0052E3    ; cmp r2, #126    # IF '~' == CH
+    ^~express_number1 1A    ; bne express_number1    # Otherwise 8-bit default
+    0700A0E3    ; mov r0, #7    # We need 7 bytes (6 hex + null)
+    04E02DE5    ; push {r14}
+    ^~malloc EB    ; bl malloc    # Get S pointer
+    04E09DE4    ; pop {r14}
+    0080A0E1    ; mov r8, r0
+    0100A0E1    ; mov r0, r1    # Put S and VALUE in place
+    0810A0E1    ; mov r1, r8
+    04102DE5    ; push {r1}    # Protect S
+    04E02DE5    ; push {r14}
+    ^~hex24l EB    ; bl hex24l    # Store 24bits
+    04E09DE4    ; pop {r14}
+    ^~express_number_done EA    ; b express_number_done    # done
+
+## hex24l: 3 bytes little-endian (low 16 via hex16l, then the top byte);
+## hex8's final bx r14 returns to OUR caller (r14 restored before the
+## tail branch), mirroring the hex32l/hex16l chaining style.
+:hex24l
+    04002DE5    ; push {r0}    # Protect top byte
+    04E02DE5    ; push {r14}
+    ^~hex16l EB    ; bl hex16l    # Store low 16 first
+    04E09DE4    ; pop {r14}
+    04009DE4    ; pop {r0}    # do top byte
+    4008A0E1    ; asr r0, #16    # shift it down
+    ^~hex8 EA    ; b hex8    # store it (tail; returns to caller)
+
+:ELF_end

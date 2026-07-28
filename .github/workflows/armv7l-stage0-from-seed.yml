@@ -1,0 +1,23 @@
+name: armv7l-stage0-from-seed
+# DEMONSTRATION (not a bug reproducer): GREEN == the demonstration SUCCEEDS.
+# From ONE 460-byte armv7l hex0 seed -- reconstructed in the job from its
+# commented text listing, not shipped as a blob -- the full kaem ladder builds
+# hex1/hex2/catm/M0/cc_armv7l/M2-Planet/blood-elf/M1/hex2/kaem and the
+# mescc-tools-extra utilities, and the 20 resulting binaries reproduce the
+# checked-in armv7l.answers.  The "from seed" constraint is ENFORCED by a scan
+# that fails on any third ELF, and two red legs prove the checks can fail.
+on:
+  push:
+  workflow_dispatch:
+jobs:
+  demonstrate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - name: Register the arm binfmt handler (the ladder execs armv7l binaries)
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm
+      - name: Demonstrate (460-byte seed -> 20 binaries -> armv7l.answers)
+        run: bash bugs/25-armv7l-stage0-from-seed/run.sh

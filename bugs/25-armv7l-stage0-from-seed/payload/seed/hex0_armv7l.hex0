@@ -1,0 +1,257 @@
+## Copyright (C) 2020 Jeremiah Orians
+## This file is part of stage0.
+##
+## stage0 is free software: you can redistribute it and/or modify
+## it under the terms of the GNU General Public License as published by
+## the Free Software Foundation, either version 3 of the License, or
+## (at your option) any later version.
+##
+## stage0 is distributed in the hope that it will be useful,
+## but WITHOUT ANY WARRANTY; without even the implied warranty of
+## MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+## GNU General Public License for more details.
+##
+## You should have received a copy of the GNU General Public License
+## along with stage0.  If not, see <http://www.gnu.org/licenses/>.
+
+## hex0_armv7l: hand-assembled A32 rendering of stage0-posix-armv7l's
+## GAS/hex0_armv7l.S reference (instruction-for-instruction; the register
+## conventions, syscall usage and control flow are that file's).
+## Usage: ./hex0-seed <input.hex0> <output-binary>
+## The processed form of this very file must be byte-identical to the seed
+## binary that processes it (the standard stage0 self-rebuild fixpoint).
+
+## ELF Header
+
+#:ELF_base ; vaddr 0x10000
+7F 45 4C 46        ## e_ident[EI_MAG0-3] ELF's magic number
+
+01                 ## e_ident[EI_CLASS] Indicating 32 bit
+01                 ## e_ident[EI_DATA] Indicating little endianness
+01                 ## e_ident[EI_VERSION] Indicating original elf
+
+03                 ## e_ident[EI_OSABI] Set at 3 because FreeBSD is strict
+00                 ## e_ident[EI_ABIVERSION] See above
+
+00 00 00 00 00 00 00 ## e_ident[EI_PAD]
+
+02 00              ## e_type Indicating Executable
+28 00              ## e_machine Indicating 32bit ARM
+01 00 00 00        ## e_version Indicating original elf
+
+54 00 01 00        ## e_entry Address of the entry point (Number of bytes this header is + Base Address)
+34 00 00 00        ## e_phoff Address of program header table
+00 00 00 00        ## e_shoff Address of section header table
+
+00 02 00 05        ## e_flags (EABI version 5, soft-float)
+
+34 00              ## e_ehsize Indicating our 52 Byte header
+
+20 00              ## e_phentsize size of a program header table
+01 00              ## e_phnum number of entries in program table
+
+00 00              ## e_shentsize size of a section header table
+00 00              ## e_shnum number of entries in section table
+
+00 00              ## e_shstrndx index of the section names
+
+## Program Header
+
+#:ELF_program_headers ; offset 0x34
+01 00 00 00        ## p_type PT-LOAD = 1
+00 00 00 00        ## p_offset
+
+00 00 01 00        ## p_vaddr
+00 00 01 00        ## p_physaddr
+
+CC 01 00 00        ## p_filesz
+CC 01 00 00        ## p_memsz
+
+07 00 00 00        ## p_flags PF-X|PF-W|PF-R = 7
+00 00 01 00        ## p_alignment
+
+#:ELF_text ; offset 0x54, vaddr 0x10054
+
+## Where the ELF Header is going to hit
+## Simply jump to _start
+## Our main function
+#:_start
+    04709DE4    ; pop {r7}                  # Get the number of arguments
+    04009DE4    ; pop {r0}                  # Get the program name
+    04009DE4    ; pop {r0}                  # Get the actual input name
+    0010A0E3    ; mov r1, #0                # prepare read_only
+    0020A0E3    ; mov r2, #0                # Extra sure
+    0570A0E3    ; mov r7, #5                # the syscall number for open()
+    000000EF    ; svc #0                    # Now open that damn file
+    34819FE5    ; ldr r8, [pc, #308]        # fin_address: ARMv7l doesn't support offsets in different segments
+    000088E5    ; str r0, [r8]              # Preserve the file pointer we were given
+
+    04009DE4    ; pop {r0}                  # Get the actual output name
+    411200E3    ; movw r1, #577             # Prepare file as O_WRONLY|O_CREAT|O_TRUNC
+    C02100E3    ; movw r2, #448             # Prepare file as RWX for owner only (700 in octal)
+    000000EF    ; svc #0                    # Now open that damn file (r7 still holds 5: Linux syscalls preserve r7)
+    20819FE5    ; ldr r8, [pc, #288]        # fout_address
+    000088E5    ; str r0, [r8]              # Preserve the file pointer we were given
+
+    ## Our flag for byte processing
+    00C0E0E3    ; mvn r12, #0               # Because ~0 == -1
+
+    ## temp storage for the sum
+    0050A0E3    ; mov r5, #0
+
+#:loop ; vaddr 0x10098 (.text offset 0x44)
+    ## Read a byte
+    380000EB    ; bl Read_byte              # (0x12C - 0x4C)/4 = 0x38
+
+    ## process byte
+    0D0000EB    ; bl hex                    # (0x84 - 0x50)/4 = 0x0D
+
+    ## Deal with -1 values
+    000050E3    ; cmp r0, #0
+    FBFFFFBA    ; blt loop
+
+    ## deal with toggle
+    00005CE3    ; cmp r12, #0
+    020000AA    ; bge print
+
+    ## process first byte of pair
+    0050A0E1    ; mov r5, r0
+    00C0A0E3    ; mov r12, #0
+    F6FFFFEA    ; b loop
+
+    ## process second byte of pair
+#:print ; .text offset 0x68
+    ## update the sum and store in output
+    0552A0E1    ; lsl r5, r5, #4
+    000085E0    ; add r0, r5, r0
+    E8809FE5    ; ldr r8, [pc, #232]        # output_address
+    0000C8E5    ; strb r0, [r8]
+
+    ## flip the toggle
+    00C0E0E3    ; mvn r12, #0
+
+    230000EB    ; bl write_byte             # (0x110 - 0x84)/4 = 0x23
+
+    EFFFFFEA    ; b loop
+
+#:hex ; .text offset 0x84
+    ## Purge Comment Lines (#)
+    230050E3    ; cmp r0, #35
+    0E00000A    ; beq purge_comment
+
+    ## Purge Comment Lines (;)
+    3B0050E3    ; cmp r0, #59
+    0C00000A    ; beq purge_comment
+
+    ## deal all ascii less than 0
+    300050E3    ; cmp r0, #48
+    170000BA    ; blt ascii_other
+
+    ## deal with 0-9
+    3A0050E3    ; cmp r0, #58
+    0F0000BA    ; blt ascii_num
+
+    ## deal with all ascii less than A
+    410050E3    ; cmp r0, #65
+    130000BA    ; blt ascii_other
+
+    ## deal with A-F
+    470050E3    ; cmp r0, #71
+    0F0000BA    ; blt ascii_high
+
+    ## deal with all ascii less than a
+    610050E3    ; cmp r0, #97
+    0F0000BA    ; blt ascii_other
+
+    ## deal with a-f
+    670050E3    ; cmp r0, #103
+    090000BA    ; blt ascii_low
+
+    ## The rest that remains needs to be ignored
+    0C0000EA    ; b ascii_other
+
+#:purge_comment ; .text offset 0xC8
+    ## Read a byte
+    04E02DE5    ; push {r14}
+    160000EB    ; bl Read_byte              # (0x12C - 0xD4)/4 = 0x16
+    04E09DE4    ; pop {r14}
+
+    ## Loop if not LF
+    0A0050E3    ; cmp r0, #10
+    FAFFFF1A    ; bne purge_comment
+
+    ## Otherwise return -1
+    0000E0E3    ; mvn r0, #0                # Because ~0 == -1
+    1EFF2FE1    ; bx r14
+
+#:ascii_num ; .text offset 0xE4
+    300040E2    ; sub r0, r0, #48
+    1EFF2FE1    ; bx r14
+
+#:ascii_low ; .text offset 0xEC
+    570040E2    ; sub r0, r0, #87
+    1EFF2FE1    ; bx r14
+
+#:ascii_high ; .text offset 0xF4
+    370040E2    ; sub r0, r0, #55
+    1EFF2FE1    ; bx r14
+
+#:ascii_other ; .text offset 0xFC
+    0000E0E3    ; mvn r0, #0                # Because ~0 == -1
+    1EFF2FE1    ; bx r14
+
+#:Done ; .text offset 0x104
+    ## program completed Successfully
+    0000A0E3    ; mov r0, #0                # All is well
+    0170A0E3    ; mov r7, #1                # put the exit syscall number in r7
+    000000EF    ; svc #0                    # Call it a good day
+
+#:write_byte ; .text offset 0x110
+    ## Print our Hex
+    0120A0E3    ; mov r2, #1                # set the size of chars we want
+    44109FE5    ; ldr r1, [pc, #68]         # output_address: What we are writing
+    3C009FE5    ; ldr r0, [pc, #60]         # fout_address: Where are we writing to
+    000090E5    ; ldr r0, [r0]
+    0470A0E3    ; mov r7, #4                # the syscall number for write
+    000000EF    ; svc #0                    # call the Kernel
+    1EFF2FE1    ; bx r14
+
+#:Read_byte ; .text offset 0x12C
+    ## Attempt to read 1 byte from input
+    0120A0E3    ; mov r2, #1                # set the size of chars we want
+    2C109FE5    ; ldr r1, [pc, #44]         # input_address: Where to put it
+    1C009FE5    ; ldr r0, [pc, #28]         # fin_address: Where are we reading from
+    000090E5    ; ldr r0, [r0]
+    0370A0E3    ; mov r7, #3                # the syscall number for read
+    000000EF    ; svc #0                    # call the Kernel
+
+    000050E3    ; cmp r0, #0                # check what we got
+    EDFFFF0A    ; beq Done                  # Got EOF call it done
+
+    ## load byte
+    10009FE5    ; ldr r0, [pc, #16]         # input_address: load char
+    0000D0E5    ; ldrb r0, [r0]
+    1EFF2FE1    ; bx r14
+
+## Because ARM doesn't support loading/storing directly to different segments
+## in a single instruction, the addresses of our data cells live in this
+## literal pool (.text offset 0x158, vaddr 0x101AC)
+#:fin_address
+    BC010100   ; .word fin (0x101BC)
+#:fout_address
+    C0010100   ; .word fout (0x101C0)
+#:output_address
+    C4010100   ; .word output (0x101C4)
+#:input_address
+    C8010100   ; .word input (0x101C8)
+
+## data cells (file offset 0x1BC, vaddr 0x101BC)
+#:ELF_end
+#:fin
+    00000000
+#:fout
+    00000000
+#:output
+    00000000
+#:input
+    00000000

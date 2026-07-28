@@ -1,0 +1,30 @@
+#!/usr/bin/env kaem
+## Copyright © 2017 Jeremiah Orians
+## Copyright © 2026 Jason Gross
+##
+## This file is part of stage0.
+##
+## stage0 is free software: you can redistribute it and/or modify
+## it under the terms of the GNU General Public License as published by
+## the Free Software Foundation, either version 3 of the License, or
+## (at your option) any later version.
+##
+## stage0 is distributed in the hope that it will be useful,
+## but WITHOUT ANY WARRANTY; without even the implied warranty of
+## MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+## GNU General Public License for more details.
+##
+## You should have received a copy of the GNU General Public License
+## along with stage0.  If not, see <http://www.gnu.org/licenses/>.
+
+## armv7l top-level driver (mirrors kaem.x86 / kaem.aarch64).
+## Run from the stage0-posix root with ONLY the 460-byte armv7l hex0 seed
+## and the 1,162-byte kaem seed as pre-existing binaries:
+##
+##     ./bootstrap-seeds/POSIX/armv7l/kaem-optional-seed ./kaem.armv7l
+##
+## Everything below is built by the line above it.
+
+./bootstrap-seeds/POSIX/armv7l/kaem-optional-seed ./armv7l/mescc-tools-seed-kaem.kaem
+./armv7l/artifact/kaem-0 ./armv7l/mescc-tools-mini-kaem.kaem
+./armv7l/bin/kaem --verbose --strict --file ./armv7l/kaem.run

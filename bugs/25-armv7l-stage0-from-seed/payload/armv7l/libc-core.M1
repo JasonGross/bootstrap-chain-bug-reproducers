@@ -1,0 +1,108 @@
+## Copyright (C) 2016 Jeremiah Orians
+## Copyright (C) 2026 Jason Gross
+## This file is part of stage0.
+##
+## stage0 is free software: you can redistribute it and/or modify
+## it under the terms of the GNU General Public License as published by
+## the Free Software Foundation, either version 3 of the License, or
+## (at your option) any later version.
+##
+## stage0 is distributed in the hope that it will be useful,
+## but WITHOUT ANY WARRANTY; without even the implied warranty of
+## MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+## GNU General Public License for more details.
+##
+## You should have received a copy of the GNU General Public License
+## along with stage0.  If not, see <http://www.gnu.org/licenses/>.
+
+## armv7l stage0-cc runtime prelude (transliterated from x86/libc-core.M1;
+## ABI summarised in this entry's run.sh header). main is entered with
+## [BP-4]=argc, [BP-8]=argv, [BP-12]=envp — the same in-place-argc trick as
+## the x86 original. Exit code = main's R0. The cc_sdiv/cc_smod software
+## division routines below are generated from GAS/cc_libc_armv7l.S (raw
+## words, internal branches baked; see that file for the algorithm).
+
+:_start
+	MOVE_BP_FROM_SP             ; Protect sp
+
+	;; Prepare argv
+	ADD_R0_SP_4                 ; ARGV_address = SP + 4
+	PUSH_R0                     ; Put argv on the stack
+
+	;; Prepare envp
+	LOAD_R0_FROM_BP             ; Get ARGC
+	ADD_R0_2                    ; OFFSET = ARGC + 2
+	LSL2_R0                     ; OFFSET = OFFSET * WORDSIZE
+	ADD_R0_BP                   ; ENVP_address = SP_entry + OFFSET
+	PUSH_R0                     ; Put envp on the stack
+
+	;; Stack offset
+	ADD_BP_4                    ; Fix BP so [BP-4] = argc in place
+
+	;; Occupy the slot x86's `call` would push a return address into: ARM
+	;; `bl` puts the link in LR, not on the stack, but the cc's local-depth
+	;; constants assume the x86 geometry (first local at BP-20 lands one word
+	;; below the return-address slot). Pushing LR restores that word.
+	PUSH_LR
+
+	;; Perform the main loop
+	^~FUNCTION_main
+	CALL_IMMEDIATE
+
+	;; Exit to kernel with main's return code (already in R0)
+	SET_R7_TO_1                 ; Syscall exit
+	SYSCALL                     ; Exit with that code
+
+:cc_udivmod
+    '0020A0E3'
+    '0130A0E1'
+    '000050E3'
+    '0D00000A'
+    '0110A0E3'
+:cc_udivmod_align
+    '030050E1'
+    '0400008A'
+    '020110E3'
+    '0200001A'
+    '8000A0E1'
+    '8110A0E1'
+    'F8FFFFEA'
+:cc_udivmod_loop
+    '000053E1'
+    '00304320'
+    '01208221'
+    'A000A0E1'
+    'A110B0E1'
+    'F9FFFF1A'
+:cc_udivmod_done
+    '1EFF2FE1'
+:cc_sdiv
+    '04402DE5'
+    '04E02DE5'
+    '004021E0'
+    '000051E3'
+    '001061B2'
+    '000050E3'
+    '000060B2'
+    'E4FFFFEB'
+    '0200A0E1'
+    '000054E3'
+    '000060B2'
+    '04E09DE4'
+    '04409DE4'
+    '1EFF2FE1'
+:cc_smod
+    '04402DE5'
+    '04E02DE5'
+    '0140A0E1'
+    '000051E3'
+    '001061B2'
+    '000050E3'
+    '000060B2'
+    'D6FFFFEB'
+    '0300A0E1'
+    '000054E3'
+    '000060B2'
+    '04E09DE4'
+    '04409DE4'
+    '1EFF2FE1'
