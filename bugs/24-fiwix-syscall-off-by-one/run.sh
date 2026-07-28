@@ -22,9 +22,13 @@ banner "UPSTREAM RE-CHECK: is the accused boundary still on Fiwix master?"
 upstream_still_has "Fiwix master kernel/syscalls.c" \
   "https://raw.githubusercontent.com/mikaku/Fiwix/master/kernel/syscalls.c" \
   "num > NR_SYSCALLS"
+# NOTE: Fiwix PR #114 corrected NR_SYSCALLS to count in sizeof(void *) units
+# (the LP64 count fix, reproducer 07); that fixes the *count*, not this
+# off-by-one.  With a correct count the `num == NR_SYSCALLS` boundary is still
+# dispatched one past the table -- on every arch, not just LP64.
 upstream_still_has "Fiwix master include/fiwix/syscalls.h" \
   "https://raw.githubusercontent.com/mikaku/Fiwix/master/include/fiwix/syscalls.h" \
-  "sizeof(syscall_table) / sizeof(unsigned int)"
+  "sizeof(syscall_table) / sizeof(void *)"
 
 banner "FETCH: Fiwix v1.5.0 (github.com/mikaku/Fiwix)"
 fetch "$FIWIX_URL" "$FIWIX_SHA" work/fiwix-1.5.0.tar.gz

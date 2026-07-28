@@ -15,13 +15,36 @@ FIWIX_SHA=e1d5ce53ff6d8648d0411b6a940ad353dcbe82f4c7fc5761e8324fbf2a4c4fe0
 
 mkdir -p work
 
-banner "UPSTREAM RE-CHECK: are both accused expressions still on Fiwix master?"
-upstream_still_has "Fiwix master fs/buffer.c" \
+# This bug was REPORTED (Fiwix issue #113) and FIXED upstream: PR #114
+# ("pointer-tables-by-pointer-size", merge 799e42c4, merged by mikaku) changed
+# both sites to size by sizeof(struct buffer *).  The reproducer is kept as a
+# historical record of the v1.5.0 defect and, below, as a REGRESSION GUARD --
+# it goes red if the pointer-sized fix is ever reverted on master.  (The host-
+# unreachable case only warns, exactly as the old upstream_still_has did.)
+banner "REGRESSION GUARD: is the pointer-sized fix still on Fiwix master?"
+fix_still_present () { # <label> <raw-url> <fixed-string the FIX introduced>
+  local label="$1" url="$2" needle="$3" tmp
+  tmp=$(mktemp)
+  if ! curl -fsSL --max-time 60 --retry 2 -o "$tmp" "$url" 2>/dev/null; then
+    loud "REGRESSION GUARD SKIPPED ($label): could not reach $url"
+    loud "  (host unreachable != fix reverted -- not failing the run over it)"
+    rm -f "$tmp"; return 0
+  fi
+  if grep -qF -- "$needle" "$tmp"; then
+    loud "regression guard OK ($label): pointer-sized fix still present on master"
+    rm -f "$tmp"; return 0
+  fi
+  rm -f "$tmp"
+  die "REGRESSION ($label): $url no longer contains the fix:
+       $needle
+     Was PR #114 reverted?  A human must re-read this reproducer's framing."
+}
+fix_still_present "fs/buffer.c" \
   "https://raw.githubusercontent.com/mikaku/Fiwix/master/fs/buffer.c" \
-  "buffer_hash_table_size / sizeof(unsigned int)"
-upstream_still_has "Fiwix master mm/memory.c" \
+  "buffer_hash_table_size / sizeof(struct buffer *)"
+fix_still_present "mm/memory.c" \
   "https://raw.githubusercontent.com/mikaku/Fiwix/master/mm/memory.c" \
-  "n * sizeof(unsigned int)"
+  "n * sizeof(struct buffer *)"
 banner "FETCH: Fiwix v1.5.0 (github.com/mikaku/Fiwix)"
 fetch "$FIWIX_URL" "$FIWIX_SHA" work/fiwix-1.5.0.tar.gz
 [ -d work/Fiwix-1.5.0 ] || tar -xzf work/fiwix-1.5.0.tar.gz -C work
@@ -64,4 +87,6 @@ loud "BUG REPRODUCED: on LP64, Fiwix 1.5.0's NR_BUF_HASH indexes up to 2x the"
 loud "buffer_hash_table allocation.  Harmless on i386; a memory-corruption"
 loud "landmine for any 64-bit port (found during a riscv64 LP64 port of"
 loud "Fiwix)."
-echo "PASS: fiwix-nr-buf-hash-lp64 reproduced"
+loud "FIXED UPSTREAM: reported as Fiwix issue #113 and fixed by PR #114 (merge"
+loud "799e42c4); kept here as history plus the regression guard above."
+echo "PASS: fiwix-nr-buf-hash-lp64 reproduced (fixed upstream; guarded)"

@@ -8,8 +8,10 @@ tcc → musl → GCC chain on x86, ARM, and RISC-V.
 cannot notice that upstream has since *fixed* it, so a report can quietly go
 stale while its badge stays green. Where the accused construct is a file on a
 public default branch, the job **re-reads it from upstream on every run** and
-fails loudly if it has gone (entries 6, 7, 11, 13). That failure means "a human
-must re-read this report", not "re-pin until it's quiet". Unreachable hosts are
+fails loudly if it has gone (entries 6, 11, 13; entry 7, now fixed upstream,
+inverts the same mechanism into a regression guard that fires if the *fix* is
+reverted). That failure means "a human must re-read this report", not "re-pin
+until it's quiet". Unreachable hosts are
 treated differently from missing code: if the fetch itself fails the job warns
 and continues, because a host being down is not evidence about the bug — and
 over this project every git host we depend on has been unreachable at least
@@ -38,7 +40,7 @@ workflow file).
 | 4 | [`tcc-mes-arm-ldouble-zero`](bugs/04-tcc-mes-arm-ldouble-zero/) | [![tcc-mes-arm-ldouble-zero](../../actions/workflows/tcc-mes-arm-ldouble-zero.yml/badge.svg)](../../actions/workflows/tcc-mes-arm-ldouble-zero.yml) | janneke tinycc fork ([gitlab.com/janneke/tinycc](https://gitlab.com/janneke/tinycc)) | `data/mescc-bugs/bug20-tcc-arm-real-miscompile/` (+ `bug15-double-zero-materialization/`) |
 | 5 | [`tcc-fp-parse-libc-poison`](bugs/05-tcc-fp-parse-libc-poison/) | [![tcc-fp-parse-libc-poison](../../actions/workflows/tcc-fp-parse-libc-poison.yml/badge.svg)](../../actions/workflows/tcc-fp-parse-libc-poison.yml) | janneke tinycc fork (context for an integer-only FP-literal parser) | `data/mescc-bugs/bug17-musl-strtod-miscompile/` |
 | 6 | [`gash-exit-success-gate`](bugs/06-gash-exit-success-gate/) | [![gash-exit-success-gate](../../actions/workflows/gash-exit-success-gate.yml/badge.svg)](../../actions/workflows/gash-exit-success-gate.yml) | Gash (Timothy Sample; `bug-gash@nongnu.org`), possibly also guix-devel | arm-commencement `gash-utils-boot-fixed` packaging (commencement.scm branch) |
-| 7 | [`fiwix-nr-buf-hash-lp64`](bugs/07-fiwix-nr-buf-hash-lp64/) | [![fiwix-nr-buf-hash-lp64](../../actions/workflows/fiwix-nr-buf-hash-lp64.yml/badge.svg)](../../actions/workflows/fiwix-nr-buf-hash-lp64.yml) | Fiwix (Mikel Izal; [github.com/mikaku/Fiwix](https://github.com/mikaku/Fiwix)) | fiwix-riscv64 port (draft PR #6) |
+| 7 | [`fiwix-nr-buf-hash-lp64`](bugs/07-fiwix-nr-buf-hash-lp64/) | [![fiwix-nr-buf-hash-lp64](../../actions/workflows/fiwix-nr-buf-hash-lp64.yml/badge.svg)](../../actions/workflows/fiwix-nr-buf-hash-lp64.yml) — **FIXED UPSTREAM** | Fiwix (Mikel Izal; [github.com/mikaku/Fiwix](https://github.com/mikaku/Fiwix)) — reported (issue [#113](https://github.com/mikaku/Fiwix/issues/113)) and fixed by PR [#114](https://github.com/mikaku/Fiwix/pull/114), merged `799e42c4` | fiwix-riscv64 port (draft PR #6) |
 | 8 | [`tcc-riscv64-ldouble-cross`](bugs/08-tcc-riscv64-ldouble-cross/) | [![tcc-riscv64-ldouble-cross](../../actions/workflows/tcc-riscv64-ldouble-cross.yml/badge.svg)](../../actions/workflows/tcc-riscv64-ldouble-cross.yml) — **ALREADY REPORTED** | [codeberg.org/ekaitz-zarraga/tcc#1](https://codeberg.org/ekaitz-zarraga/tcc/issues/1); fixed upstream in tinycc mob `923fba83` ("general: long double issues") | riscv64 tcc/flex chain (`JasonGross/test-debugging-riscv64-tcc-flex`) |
 | 9 | [`mescc-riscv64-uint32-add`](bugs/09-mescc-riscv64-uint32-add/) | [![mescc-riscv64-uint32-add](../../actions/workflows/mescc-riscv64-uint32-add.yml/badge.svg)](../../actions/workflows/mescc-riscv64-uint32-add.yml) | GNU Mes (`bug-mes@gnu.org`) | tinyemu-retarget `scripts/tinyemu-riscv/drivers/qemu-user-ref/mescc-u32-repro/` (branch `tinyemu-riscv-mes-tcc`) |
 | 10 | [`tcc-mes-riscv64-fp-literal`](bugs/10-tcc-mes-riscv64-fp-literal/) | [![tcc-mes-riscv64-fp-literal](../../actions/workflows/tcc-mes-riscv64-fp-literal.yml/badge.svg)](../../actions/workflows/tcc-mes-riscv64-fp-literal.yml) | GNU Mes (`bug-mes@gnu.org`); context for the janneke tinycc fork (integer-only FP-literal parser, cf. bug 5) | riscv64 tcc-mes fixpoint forensics (branch `tinyemu-riscv-mes-tcc`, `qemu-user-ref/fixpoint-probes/`) |
@@ -150,7 +152,7 @@ The workflow builds guile 2.0.11 from source (cached), shows
 (asserts the crash), and re-runs it with the gate widened one line to
 `(2 2 0)` (control: works, file deleted).
 
-### 7. `fiwix-nr-buf-hash-lp64` — Fiwix 1.5.0 buffer hash: sized in `unsigned int` units, indexed as a pointer array — 2× out of bounds on LP64
+### 7. `fiwix-nr-buf-hash-lp64` — Fiwix 1.5.0 buffer hash: sized in `unsigned int` units, indexed as a pointer array — 2× out of bounds on LP64 (FIXED UPSTREAM)
 
 `fs/buffer.c` defines `NR_BUF_HASH` as `buffer_hash_table_size /
 sizeof(unsigned int)` and `mm/memory.c` also *sizes* the table region in
@@ -163,6 +165,15 @@ bounds. The workflow lifts the exact expressions from the pinned v1.5.0
 tarball into a user-space harness and shows the LP64 overflow arithmetically
 and as an AddressSanitizer heap-buffer-overflow on the exact hash-insert
 write, with a `-m32` control staying in bounds.
+
+Reported to Fiwix from this project as issue
+[#113](https://github.com/mikaku/Fiwix/issues/113) and fixed by PR
+[#114](https://github.com/mikaku/Fiwix/pull/114)
+("pointer-tables-by-pointer-size"), merged by mikaku on 2026-07-27 as
+`799e42c4`; both sites now size by `sizeof(struct buffer *)`. The reproducer
+is retained as a historical record and as a **regression guard** — its live
+re-check now asserts the pointer-sized fix is still present on `master` and
+goes red only if it is ever reverted.
 
 ### 8. `tcc-riscv64-ldouble-cross` — cross tcc materializes riscv64 long doubles as the host's x87 image (ALREADY REPORTED upstream)
 
