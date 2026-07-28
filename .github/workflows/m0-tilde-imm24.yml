@@ -1,0 +1,23 @@
+name: m0-tilde-imm24
+# GREEN == the bug REPRODUCES: stage0's M0 macro assembler numerates the `~`
+# immediate at 8 bits, so the armv7l `~0 JUMP_ALWAYS` idiom assembles two bytes
+# short (00 instead of the 24-bit 000000 the ARM `b .+8` needs).  Both the x86
+# and aarch64 upstream M0 binaries (built from pinned stage0-posix sources and
+# run under qemu-user) emit the identical 8-bit answer, while M1 -- the
+# assembler used later in the same chain -- emits the correct 24-bit form.
+# PART A re-reads live mescc-tools M1-macro.c so a change to the referee shows.
+on:
+  push:
+  workflow_dispatch:
+jobs:
+  reproduce:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install gcc + qemu-user (i386 + aarch64) + git
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q gcc git qemu-user-static
+      - name: Reproduce (x86 M0 == aarch64 M0 == 8-bit ~0; M1 == 24-bit)
+        run: bash bugs/27-m0-tilde-imm24/run.sh

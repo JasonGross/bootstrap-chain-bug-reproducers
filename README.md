@@ -60,6 +60,7 @@ workflow file).
 | 24 | [`fiwix-syscall-off-by-one`](bugs/24-fiwix-syscall-off-by-one/) | [![fiwix-syscall-off-by-one](../../actions/workflows/fiwix-syscall-off-by-one.yml/badge.svg)](../../actions/workflows/fiwix-syscall-off-by-one.yml) | Fiwix (Mikel Izal; [github.com/mikaku/Fiwix](https://github.com/mikaku/Fiwix)) — separate from the LP64 count fix (bug 7); report pending | the `num > NR_SYSCALLS` off-by-one deliberately left out of reproducer 7's count fix — a correct-count kernel still admits `num == NR_SYSCALLS` and dispatches one past the syscall table |
 | 25 | [`m2libc-armv7l-unlink-arg`](bugs/25-m2libc-armv7l-unlink-arg/) | [![m2libc-armv7l-unlink-arg](../../actions/workflows/m2libc-armv7l-unlink-arg.yml/badge.svg)](../../actions/workflows/m2libc-armv7l-unlink-arg.yml) | M2libc (Jeremiah Orians; [github.com/oriansj/M2libc](https://github.com/oriansj/M2libc)) | native armv7l stage0 ladder (`scripts/s7-gate.sh`, branch `stage0-armv7l`) — a chain-built `rm` cannot delete |
 | 26 | [`armv7l-stage0-from-seed`](bugs/26-armv7l-stage0-from-seed/) | [![armv7l-stage0-from-seed](../../actions/workflows/armv7l-stage0-from-seed.yml/badge.svg)](../../actions/workflows/armv7l-stage0-from-seed.yml) | **Not a bug** — demonstration that a native armv7l stage0 ladder works from the seed; upstream [stage0-posix](https://github.com/oriansj/stage0-posix) has no armv7l ladder (GAS references only) | 460-byte armv7l hex0 seed → 20 binaries → `armv7l.answers` |
+| 27 | [`m0-tilde-imm24`](bugs/27-m0-tilde-imm24/) | [![m0-tilde-imm24](../../actions/workflows/m0-tilde-imm24.yml/badge.svg)](../../actions/workflows/m0-tilde-imm24.yml) | stage0-posix M0 (Jeremiah Orians; [github.com/oriansj/stage0-posix](https://github.com/oriansj/stage0-posix)) | native armv7l stage0 ladder (`scripts/M0-gate.sh`, branch `stage0-armv7l`) — the `~0 JUMP_ALWAYS` skip idiom two bytes short |
 
 
 ### 1. `mes-ldexp-stub` — GNU Mes' ldexp is a `return 0;` stub
@@ -657,6 +658,31 @@ demonstrates from-seed reproducibility, **not** cross-lineage diversity; and it
 takes no position on whether any of this should be adopted upstream. Harness in
 [`bugs/26-armv7l-stage0-from-seed/`](bugs/26-armv7l-stage0-from-seed/).
 
+### 27. `m0-tilde-imm24` — stage0's M0 assembler has no 24-bit `~` immediate, so the armv7l branch idiom assembles two bytes short
+
+The mescc-tools M1 assembler numerates an immediate operand by a one-character
+width prefix — `!` is 8-bit, `~` is 24-bit (`M1-macro.c`:
+`else if('~' == c) number_of_bytes = 3;` and `value & 0xFFFFFF`). The armv7l
+M2libc writes its "skip the next 32-bit datum" idiom as `~0 JUMP_ALWAYS`, which
+must assemble to a 4-byte ARM `b .+8` — the 24-bit `000000` plus the `EA`
+condition byte. But **M0**, the minimal per-architecture assembler used earlier
+in the same stage0 ladder (hand-transcribed per arch from `M0-macro.c`, which
+has no `~` case at all), numerates `~` at only 8 bits: `~0` comes out as `00`,
+two bytes short, so every armv7l `~`-immediate site misaligns every label that
+follows it.
+
+The workflow builds the two upstream M0 binaries from pinned `stage0-posix-x86`
+and `stage0-posix-aarch64` sources (linked by a gcc-built `hex2`) and runs each
+under qemu-user on `~0 JUMP_ALWAYS`. **Both** the x86 and the aarch64 M0 render
+`~0` as the 8-bit `00`, and their outputs are **byte-identical** — two
+independently hand-written per-arch M0 lineages agree on the wrong answer, so a
+cross-lineage identity check between them cannot catch a defect they share. The
+gcc-built M1 — the assembler used later in the same
+chain — renders the same `~0` as the correct 24-bit `000000`. The two
+assemblers disagree on the width of `~`. PART A re-reads the live mescc-tools
+`M1-macro.c` on every run and fails if M1's `~` width changes, so the
+correct-width reference cannot silently rot.
+
 ## Pinned sources
 
 | Source | Pin |
@@ -679,6 +705,7 @@ takes no position on whether any of this should be adopted upstream. Harness in
 | Gash-Utils | `gash-utils-0.2.0.tar.gz` from download.savannah.gnu.org, sha256 `e6aae5a6…59d4a3` |
 | r6rs-compression | git.ngyro.com/r6rs-compression @ `a2d01f24d5ad703ed2742b97053d19dcd42f89b1` (the commit bootar v1b pins) |
 | stage0-posix (armv7l ladder demo) | oriansj repos, commit-verified in the job: `M2libc` `68a23cfd…cc4e`, `M2-Planet` `bd2fe4b0…665d`, `M2-Mesoplanet` `4b011a85…9547`, `mescc-tools` `5adfbf33…9ac4`, `mescc-tools-extra` `a151c245…a83b` |
+| stage0-posix M0 + mescc-tools (`~` immediate) | github.com/oriansj, pinned: `stage0-posix-x86 14721630`, `stage0-posix-aarch64 cedcddd2`, `mescc-tools d59464d2` |
 | struct-pack / hashing | gitlab.com/weinholt @ `11b71963…239ee` / `eb280801…ef0cb` (likewise bootar's pins) |
 | musl | `musl-1.1.24.tar.gz` from musl.libc.org, sha256 `1370c9a8…022a3` |
 | M2libc / M2-Planet / mescc-tools (armv7l `unlink`) | github.com/oriansj, pinned: `M2libc b7e5d1cb`, `M2-Planet 34fbd5c2`, `mescc-tools d59464d2` |
