@@ -9,6 +9,14 @@
 # GREEN == the boundary index is admitted and reads past the table (arithmetic
 # proof on i386 and x86_64 + an AddressSanitizer trap), while the corrected
 # `>=` check rejects it.
+#
+# CITING A GREEN RUN: the arithmetic proof (legs 1/1b) is the guaranteed content
+# of a pass.  The AddressSanitizer trap (leg 2) fires only when the ASan runtime
+# can initialize; under a tight CI address-space ulimit it cannot, and the leg
+# degrades to a NOTE and still exits 0.  So a green badge does NOT by itself
+# establish that the ASan trap fired -- read the leg-2 log and confirm
+# `global-buffer-overflow ... syscall_table[NR_SYSCALLS]` rather than trusting
+# the exit code.
 cd "$(dirname "$0")"
 . ../common.sh
 
