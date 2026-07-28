@@ -60,7 +60,7 @@ workflow file).
 | 24 | [`fiwix-syscall-off-by-one`](bugs/24-fiwix-syscall-off-by-one/) | [![fiwix-syscall-off-by-one](../../actions/workflows/fiwix-syscall-off-by-one.yml/badge.svg)](../../actions/workflows/fiwix-syscall-off-by-one.yml) | Fiwix (Mikel Izal; [github.com/mikaku/Fiwix](https://github.com/mikaku/Fiwix)) — separate from the LP64 count fix (bug 7); report pending | the `num > NR_SYSCALLS` off-by-one deliberately left out of reproducer 7's count fix — a correct-count kernel still admits `num == NR_SYSCALLS` and dispatches one past the syscall table |
 | 25 | [`m2libc-armv7l-unlink-arg`](bugs/25-m2libc-armv7l-unlink-arg/) | [![m2libc-armv7l-unlink-arg](../../actions/workflows/m2libc-armv7l-unlink-arg.yml/badge.svg)](../../actions/workflows/m2libc-armv7l-unlink-arg.yml) | M2libc (Jeremiah Orians; [github.com/oriansj/M2libc](https://github.com/oriansj/M2libc)) | native armv7l stage0 ladder (`scripts/s7-gate.sh`, branch `stage0-armv7l`) — `unlink()`/`close()`/`chroot()` pass `&arg` not `arg`; a chain-built `rm` cannot delete |
 | 26 | [`armv7l-stage0-from-seed`](bugs/26-armv7l-stage0-from-seed/) | [![armv7l-stage0-from-seed](../../actions/workflows/armv7l-stage0-from-seed.yml/badge.svg)](../../actions/workflows/armv7l-stage0-from-seed.yml) | **Not a bug** — demonstration that a native armv7l stage0 ladder works from the seed; upstream [stage0-posix](https://github.com/oriansj/stage0-posix) has no armv7l ladder (GAS references only) | 460-byte armv7l hex0 seed → 20 binaries → `armv7l.answers` |
-| 27 | [`m0-tilde-imm24`](bugs/27-m0-tilde-imm24/) | [![m0-tilde-imm24](../../actions/workflows/m0-tilde-imm24.yml/badge.svg)](../../actions/workflows/m0-tilde-imm24.yml) | stage0-posix M0 (Jeremiah Orians; [github.com/oriansj/stage0-posix](https://github.com/oriansj/stage0-posix)) | native armv7l stage0 ladder (`scripts/M0-gate.sh`, branch `stage0-armv7l`) — the `~0 JUMP_ALWAYS` skip idiom two bytes short |
+| 27 | [`m0-tilde-imm24`](bugs/27-m0-tilde-imm24/) | [![m0-tilde-imm24](../../actions/workflows/m0-tilde-imm24.yml/badge.svg)](../../actions/workflows/m0-tilde-imm24.yml) | stage0-posix M0 (Jeremiah Orians; [github.com/oriansj/stage0-posix](https://github.com/oriansj/stage0-posix)) | native armv7l stage0 ladder (`scripts/M0-gate.sh`, branch `stage0-armv7l`) — M0 numerates armv7l's 24-bit `~` branch immediate (`^~label`) as 8 bits, two bytes short |
 
 
 ### 1. `mes-ldexp-stub` — GNU Mes' ldexp is a `return 0;` stub
@@ -679,13 +679,16 @@ takes no position on whether any of this should be adopted upstream. Harness in
 The mescc-tools M1 assembler numerates an immediate operand by a one-character
 width prefix — `!` is 8-bit, `~` is 24-bit (`M1-macro.c`:
 `else if('~' == c) number_of_bytes = 3;` and `value & 0xFFFFFF`). The armv7l
-M2libc writes its "skip the next 32-bit datum" idiom as `~0 JUMP_ALWAYS`, which
-must assemble to a 4-byte ARM `b .+8` — the 24-bit `000000` plus the `EA`
-condition byte. But **M0**, the minimal per-architecture assembler used earlier
-in the same stage0 ladder (hand-transcribed per arch from `M0-macro.c`, which
-has no `~` case at all), numerates `~` at only 8 bits: `~0` comes out as `00`,
-two bytes short, so every armv7l `~`-immediate site misaligns every label that
-follows it.
+M2libc uses `~` for the 24-bit relative offset of an ARM `B{cond}`/`BL`, written
+`^~label` (e.g. `^~divide_loop JUMP_NE`); this reproducer probes that same width
+with a minimal `~0 JUMP_ALWAYS`, which must assemble to a 4-byte ARM `b .+8` —
+the 24-bit `000000` plus the `EA` condition byte. But **M0**, the minimal
+per-architecture assembler used earlier in the same stage0 ladder (shipped as
+`M0_<arch>.hex2` with readable `GAS/M0_<arch>.S` and `Development/M0_<arch>.M1`
+mirrors), has no `~` case — its numerate routine special-cases only `%` and `@`
+and falls through to an 8-bit store for everything else, so it numerates `~` at
+only 8 bits: `~0` comes out as `00`, two bytes short, so every armv7l
+`~`-immediate site misaligns every label that follows it.
 
 The workflow builds the two upstream M0 binaries from pinned `stage0-posix-x86`
 and `stage0-posix-aarch64` sources (linked by a gcc-built `hex2`) and runs each

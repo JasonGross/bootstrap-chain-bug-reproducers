@@ -4,13 +4,17 @@
 # The mescc-tools M1 assembler numerates immediate operands by a one-character
 # width prefix: `!` = 8-bit, `@`/`%` wider, and `~` = 24-bit (M1-macro.c:
 # `else if('~' == c) number_of_bytes = 3;` / `value & 0xFFFFFF`).  The armv7l
-# M2libc writes its "skip the next 32-bit datum" idiom as `~0 JUMP_ALWAYS`,
-# which must assemble to a 4-byte ARM `b .+8` (`000000` + the `EA` condition
-# byte).  M0 -- the minimal per-architecture assembler used earlier in the
-# stage0 ladder, hand-transcribed per arch from `M0-macro.c`, which has no `~`
-# case at all -- numerates `~` at only 8 bits.  So `~0` comes out as `00`, two
-# bytes short of `000000`; every armv7l `~`-immediate site is two bytes short,
-# misaligning every following label.
+# M2libc uses `~` for the 24-bit relative offset of an ARM `B{cond}`/`BL`,
+# written `^~label` (e.g. `^~divide_loop JUMP_NE`).  This reproducer probes that
+# same width with a minimal one-line `~0 JUMP_ALWAYS`, which must assemble to a
+# 4-byte ARM `b .+8` (`000000` + the `EA` condition byte).  M0 -- the minimal
+# per-architecture assembler used earlier in the stage0 ladder, shipped as
+# `M0_<arch>.hex2` with readable `GAS/M0_<arch>.S` and `Development/M0_<arch>.M1`
+# mirrors -- has no `~` case: its numerate routine special-cases only `%` and
+# `@` and falls through to an 8-bit store for everything else, so it numerates
+# `~` at only 8 bits.  So `~0` comes out as `00`, two bytes short of `000000`;
+# every armv7l `~`-immediate site is two bytes short, misaligning every
+# following label.
 #
 # GREEN == the bug REPRODUCES (by EXECUTION, not inspection):
 #   A  PREMISE (live mescc-tools HEAD): M1 still numerates `~` as 24 bits
