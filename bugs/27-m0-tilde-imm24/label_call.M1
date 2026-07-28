@@ -1,0 +1,3 @@
+DEFINE CALL_ALWAYS EB
+:loop
+^~loop CALL_ALWAYS

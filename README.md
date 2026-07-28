@@ -712,10 +712,15 @@ a defect they share. The gcc-built M1 — the assembler used later in the same
 chain — renders the same `~0` as the correct 24-bit `000000`. PART A re-reads the
 live mescc-tools `M1-macro.c` on every run and fails if M1's `~` width changes,
 so the correct-width reference cannot silently rot. **PART E** is the boundary
-control: it takes the label form `^~loop JUMP_NE` through the full M0→hex2 and
-M1→hex2 pipelines and asserts they are byte-identical (`fe ff ff 1a`), positively
-demonstrating that the 13 `^~label` sites are unaffected and the bug is confined
-to the one literal site.
+control: it takes the label form through the full M0→hex2 and M1→hex2 pipelines
+and asserts byte-identity. M2libc's 13 `^~label` sites use two mnemonics — 9
+`CALL_ALWAYS` and 4 `JUMP_NE` — so PART E exercises **both**, rather than letting
+one sample stand for the whole set: `^~loop JUMP_NE` → `fe ff ff 1a` and
+`^~loop CALL_ALWAYS` → `fe ff ff eb`, each identical across the x86 M0, the
+aarch64 M0 and M1 (the two forms share the `fe ff ff` displacement and differ
+only in the opcode byte, so hex2 sizes `~` on the character alone). This
+positively demonstrates that the 13 `^~label` sites are unaffected and the bug is
+confined to the one literal site.
 
 ## Pinned sources
 

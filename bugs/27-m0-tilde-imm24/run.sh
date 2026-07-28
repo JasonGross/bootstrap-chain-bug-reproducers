@@ -157,29 +157,46 @@ banner "PART E -- BOUNDARY: the label form ^~label is hex2-LINKER-resolved, so U
 # `^~label`'s operand is a label, not a number, so the assembler (M0 or M1) does
 # not numerate it -- it copies the token through to the hex2 linker, which sizes
 # `~` at 3 bytes (the leading `^` is a hex2 alignment marker, not an assembler
-# signal).  So
-# it must assemble byte-identically through M0->hex2 and through M1->hex2.  This
-# is the control that BOUNDS the bug to the literal `~0` site (PART B-D): the 13
-# armv7l `^~label` branch/call targets are NOT mis-assembled.  label.M1 defines a
-# label and branches back to it with `^~loop JUMP_NE`; the correct armv7l
-# encoding is the 4-byte branch fe ff ff 1a (24-bit displacement -2 + the 1A
-# condition byte).
-run_m0 "qemu-i386-static ./M0-x86"        work/lbl_x86.hex2 label.M1
-run_m0 "qemu-aarch64-static ./M0-aarch64" work/lbl_a64.hex2 label.M1
-"$M1B" --architecture armv7l --little-endian -f label.M1 -o work/lbl_m1.hex2 >/dev/null 2>&1 || die "M1 crashed on label.M1"
-# link each hex2 text to a final armv7l binary -- this is where `~` gets sized.
-for p in lbl_x86 lbl_a64 lbl_m1; do
-  "$HEX2" --architecture armv7l --little-endian --base-address 0x0 -f "work/$p.hex2" -o "work/$p.bin" >/dev/null 2>&1 \
-    || die "hex2 link failed for $p"
-done
-loud "M0-x86     -> hex2 : $(od -An -tx1 work/lbl_x86.bin | tr -s ' ')"
-loud "M0-aarch64 -> hex2 : $(od -An -tx1 work/lbl_a64.bin | tr -s ' ')"
-loud "M1         -> hex2 : $(od -An -tx1 work/lbl_m1.bin  | tr -s ' ')"
-sz=$(wc -c < work/lbl_m1.bin)
-[ "$sz" -eq 4 ] || die "label form is not a 4-byte ARM branch (got $sz bytes) -- re-read"
-cmp -s work/lbl_x86.bin work/lbl_m1.bin || die "M0-x86 and M1 disagree on the label form -- expected byte-identical (linker-sized)"
-cmp -s work/lbl_a64.bin work/lbl_m1.bin || die "M0-aarch64 and M1 disagree on the label form -- expected byte-identical (linker-sized)"
-loud "label form ^~loop JUMP_NE: M0-x86 == M0-aarch64 == M1, a 4-byte branch -- hex2 sizes ~, the M0 gap does not reach it"
+# signal).  So it must assemble byte-identically through M0->hex2 and through
+# M1->hex2.  This is the control that BOUNDS the bug to the literal `~0` site
+# (PART B-D): the 13 armv7l `^~label` branch/call targets are NOT mis-assembled.
+#
+# M2libc's 13 sites use TWO mnemonics -- 9 `CALL_ALWAYS` (EB) and 4 `JUMP_NE`
+# (1A) -- so this leg exercises BOTH rather than letting one sample stand for the
+# whole set.  Each file (label.M1 / label_call.M1) defines a `:loop` and branches
+# back to it; the correct armv7l encoding is a 4-byte branch: the 24-bit
+# displacement -2 (`fe ff ff`) plus the mnemonic's opcode byte -- `fe ff ff 1a`
+# for JUMP_NE, `fe ff ff eb` for CALL_ALWAYS.
+
+# assemble one label-form file through M0-x86, M0-aarch64 and M1, link each to an
+# armv7l binary (where `~` is sized), and assert all three agree on a 4-byte
+# branch carrying the expected opcode byte.  <src.M1> <tag> <opcode-hex> <human>
+check_label_form () {
+  run_m0 "qemu-i386-static ./M0-x86"        "work/${2}_x86.hex2" "$1"
+  run_m0 "qemu-aarch64-static ./M0-aarch64" "work/${2}_a64.hex2" "$1"
+  "$M1B" --architecture armv7l --little-endian -f "$1" -o "work/${2}_m1.hex2" >/dev/null 2>&1 || die "M1 crashed on $1"
+  for who in x86 a64 m1; do
+    "$HEX2" --architecture armv7l --little-endian --base-address 0x0 -f "work/${2}_${who}.hex2" -o "work/${2}_${who}.bin" >/dev/null 2>&1 \
+      || die "hex2 link failed for ${2}_${who}"
+  done
+  loud "$4  M0-x86 : $(od -An -tx1 work/${2}_x86.bin | tr -s ' ')"
+  loud "$4  M0-a64 : $(od -An -tx1 work/${2}_a64.bin | tr -s ' ')"
+  loud "$4  M1     : $(od -An -tx1 work/${2}_m1.bin  | tr -s ' ')"
+  [ "$(wc -c < work/${2}_m1.bin)" -eq 4 ] || die "$4 is not a 4-byte ARM branch -- re-read"
+  cmp -s "work/${2}_x86.bin" "work/${2}_m1.bin" || die "$4: M0-x86 != M1 -- expected byte-identical (linker-sized)"
+  cmp -s "work/${2}_a64.bin" "work/${2}_m1.bin" || die "$4: M0-aarch64 != M1 -- expected byte-identical (linker-sized)"
+  [ "$(od -An -tx1 work/${2}_m1.bin | tr -d ' \n')" = "feffff$3" ] \
+    || die "$4: expected fe ff ff $3, got $(od -An -tx1 work/${2}_m1.bin | tr -s ' ')"
+  loud "$4: M0-x86 == M0-aarch64 == M1, 4-byte branch fe ff ff $3 -- hex2 sizes ~, the M0 gap does not reach it"
+}
+check_label_form label.M1      lblJ 1a "JUMP_NE ^~loop (covers the 4 JUMP_NE sites)"
+check_label_form label_call.M1 lblC eb "CALL_ALWAYS ^~loop (covers the 9 CALL_ALWAYS sites)"
+# both mnemonics carry the SAME 3-byte displacement (fe ff ff), differing only in
+# the trailing opcode byte -- direct evidence that hex2 sizes `~` on the `~`
+# character alone, independent of the instruction it prefixes.
+cmp -s <(head -c3 work/lblJ_m1.bin) <(head -c3 work/lblC_m1.bin) \
+  || die "JUMP_NE and CALL_ALWAYS label forms differ in the ~ displacement -- expected identical fe ff ff"
+loud "both label mnemonics share the ~ displacement fe ff ff, differ only in opcode (1a vs eb) -- hex2 sizes ~ on the character, not the opcode"
 
 banner "VERDICT"
 loud "BUG REPRODUCED: stage0's M0 numerates the LITERAL '~' immediate at 8 bits,"
@@ -189,4 +206,4 @@ loud "lineages emit the identical 8-bit answer, while M1 -- the assembler used"
 loud "later in the same chain -- emits the correct 24-bit form.  The label form"
 loud "^~label is hex2-linker-resolved and assembles identically under M0 and M1,"
 loud "so the impact is the one literal site, not the 13 label-relative ones."
-echo "PASS: m0-tilde-imm24 reproduced (literal ~0: x86 M0 == aarch64 M0 == 8-bit; M1 == 24-bit; label ^~ form identical via hex2)"
+echo "PASS: m0-tilde-imm24 reproduced (literal ~0: x86 M0 == aarch64 M0 == 8-bit; M1 == 24-bit; both label mnemonics ^~loop JUMP_NE and ^~loop CALL_ALWAYS identical via hex2)"
